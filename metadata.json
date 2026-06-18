@@ -1,0 +1,6 @@
+{
+  "name": "Document Management",
+  "description": "An elegant, shelf-based workspace for creating, editing, and organizing documents with categorical shelves, tags, search, and dynamic summaries.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
