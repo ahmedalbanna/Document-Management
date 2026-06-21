@@ -1,5 +1,17 @@
 export type DocumentType = 'markdown' | 'text' | 'json' | 'pdf' | 'spreadsheet' | 'image';
 
+export interface DocumentVersion {
+  id: string;
+  versionNumber: number;
+  title: string;
+  content: string;
+  type: DocumentType;
+  tags: string[];
+  updatedAt: string;
+  changeSummary: string;
+  size: number;
+}
+
 export interface Document {
   id: string;
   title: string;
@@ -13,6 +25,7 @@ export interface Document {
   isFavorite: boolean;
   isArchived: boolean;
   customPreviewColor?: string;
+  versions?: DocumentVersion[];
 }
 
 export interface Shelf {

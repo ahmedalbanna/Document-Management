@@ -175,15 +175,64 @@ export default function App() {
     }));
   };
 
-  const handleSaveDocEdits = (docId: string, updates: Partial<Document>) => {
-    setDocuments(prev => prev.map(d => {
-      if (d.id === docId) {
-        logAction(updates.title || d.title, 'edit', docId);
-        return { ...d, ...updates, updatedAt: new Date().toISOString() };
-      }
-      return d;
-    }));
-    setActiveDoc(null);
+  const handleSaveDocEdits = (docId: string, updates: Partial<Document>, changeSummary?: string) => {
+    let updatedDoc: Document | null = null;
+    setDocuments(prev => {
+      const next = prev.map(d => {
+        if (d.id === docId) {
+          const versions = d.versions ? [...d.versions] : [];
+          
+          // If no versions exist yet, record the existing document state as V1
+          if (versions.length === 0) {
+            versions.push({
+              id: `v-init-${d.id}`,
+              versionNumber: 1,
+              title: d.title,
+              content: d.content,
+              type: d.type,
+              tags: [...d.tags],
+              updatedAt: d.updatedAt || d.createdAt || new Date().toISOString(),
+              changeSummary: 'Original document state',
+              size: d.size,
+            });
+          }
+          
+          const nextVerNum = versions.length + 1;
+          const newSize = updates.content !== undefined ? new Blob([updates.content]).size : d.size;
+          
+          // Append the new state as the next version
+          versions.push({
+            id: `v-${Date.now()}-${nextVerNum}`,
+            versionNumber: nextVerNum,
+            title: updates.title !== undefined ? updates.title : d.title,
+            content: updates.content !== undefined ? updates.content : d.content,
+            type: updates.type !== undefined ? updates.type : d.type,
+            tags: updates.tags !== undefined ? [...updates.tags] : [...d.tags],
+            updatedAt: new Date().toISOString(),
+            changeSummary: changeSummary || `Revision ${nextVerNum}`,
+            size: newSize,
+          });
+
+          updatedDoc = {
+            ...d,
+            ...updates,
+            updatedAt: new Date().toISOString(),
+            size: newSize,
+            versions,
+          };
+
+          logAction(updates.title || d.title, 'edit', docId);
+          return updatedDoc;
+        }
+        return d;
+      });
+      return next;
+    });
+
+    // Keep editor open and synced with the latest version history and content modifications
+    if (updatedDoc) {
+      setActiveDoc(updatedDoc);
+    }
   };
 
   // Add dummy blank document directly to shelf

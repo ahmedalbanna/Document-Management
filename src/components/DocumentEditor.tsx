@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import { 
   X, 
   Save, 
@@ -14,14 +14,17 @@ import {
   Clock,
   Check,
   Type,
-  ExternalLink
+  ExternalLink,
+  History,
+  RotateCcw
 } from 'lucide-react';
-import { Document, Shelf } from '../types';
+import { Document, Shelf, DocumentVersion } from '../types';
+import { computeLineDiff } from '../utils/diff';
 
 interface DocumentEditorProps {
   document: Document;
   shelves: Shelf[];
-  onSave: (docId: string, updates: Partial<Document>) => void;
+  onSave: (docId: string, updates: Partial<Document>, changeSummary?: string) => void;
   onClose: () => void;
 }
 
@@ -59,7 +62,17 @@ export default function DocumentEditor({
     setIsSaved(isUnchanged);
   }, [title, content, type, category, tags, document]);
 
+  const [activeSidebarTab, setActiveSidebarTab] = useState<'metadata' | 'history'>('metadata');
+  const [showSaveConfirm, setShowSaveConfirm] = useState(false);
+  const [changeDescription, setChangeDescription] = useState('');
+  const [selectedVersionForDiff, setSelectedVersionForDiff] = useState<DocumentVersion | null>(null);
+  const [showDiffModal, setShowDiffModal] = useState(false);
+
   const handleSave = () => {
+    setShowSaveConfirm(true);
+  };
+
+  const handleConfirmSave = (commitMsg: string) => {
     onSave(document.id, {
       title,
       content,
@@ -68,8 +81,10 @@ export default function DocumentEditor({
       tags,
       size: new Blob([content]).size,
       updatedAt: new Date().toISOString(),
-    });
+    }, commitMsg.trim() || undefined);
     setIsSaved(true);
+    setShowSaveConfirm(false);
+    setChangeDescription('');
   };
 
   const handleAddTag = (e: React.FormEvent) => {
@@ -90,6 +105,21 @@ export default function DocumentEditor({
   const charCount = content.length;
   const lineCount = content.split('\n').length;
   const readingTime = Math.max(1, Math.ceil(wordCount / 200));
+
+  // Setup versions fallback for backwards-compatible loading
+  const docVersions = document.versions && document.versions.length > 0
+    ? document.versions
+    : [{
+        id: `v-init-${document.id}`,
+        versionNumber: 1,
+        title: document.title,
+        content: document.content,
+        type: document.type,
+        tags: [...document.tags],
+        updatedAt: document.updatedAt || document.createdAt,
+        changeSummary: 'Original document state',
+        size: document.size,
+      }];
 
   // A ultra-responsive, beautiful custom text & markdown renderer
   const renderMarkdown = (text: string) => {
@@ -200,15 +230,16 @@ export default function DocumentEditor({
   };
 
   return (
-    <motion.div
-      id="document-editor"
-      initial={{ opacity: 0, scale: 0.98 }}
-      animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.98 }}
-      className="fixed inset-0 bg-gray-950/40 backdrop-blur-sm flex items-center justify-center p-4 z-50 rounded-2xl select-none"
-    >
-      <div 
-        id="editor-container"
+    <>
+      <motion.div
+        id="document-editor"
+        initial={{ opacity: 0, scale: 0.98 }}
+        animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.98 }}
+        className="fixed inset-0 bg-gray-950/40 backdrop-blur-sm flex items-center justify-center p-4 z-50 rounded-2xl select-none"
+      >
+        <div 
+          id="editor-container"
         className="bg-white rounded-3xl border border-gray-100 shadow-2xl w-full max-w-6xl h-[90vh] flex flex-col overflow-hidden"
       >
         {/* Editor navbar heading */}
@@ -315,121 +346,424 @@ export default function DocumentEditor({
             )}
           </div>
 
-          {/* RIGHT SIDEBAR: Document Meta Parameters */}
-          <div className="w-72 bg-gray-50 border-1 border-gray-100 flex flex-col p-5 overflow-y-auto gap-5 shrink-0 hidden lg:flex">
+          {/* RIGHT SIDEBAR: Document Meta Parameters & Revision History Tab controls */}
+          <div className="w-80 bg-gray-50 border-1 border-gray-100 flex flex-col p-5 overflow-y-auto shrink-0 hidden lg:flex border-l">
             
-            {/* Shelf & Type Category */}
-            <div className="flex flex-col gap-1.5">
-              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Classification</span>
-              
-              {/* Shelf Selection */}
-              <div className="flex flex-col gap-1">
-                <label className="text-[10px] text-gray-400 flex items-center gap-1">
-                  <Folder className="h-3 w-3" /> Shelf row
-                </label>
-                <select
-                  id="editor-shelf-select"
-                  value={category}
-                  onChange={(e) => setCategory(e.target.value)}
-                  className="w-full text-xs bg-white border border-gray-200 rounded-lg p-2 focus:border-indigo-500 focus:outline-none"
-                >
-                  {shelves.map(s => (
-                    <option key={s.id} value={s.id}>{s.name}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Type Selection */}
-              <div className="flex flex-col gap-1 mt-2">
-                <label className="text-[10px] text-gray-400">File Signature</label>
-                <select
-                  id="editor-type-select"
-                  value={type}
-                  onChange={(e) => setType(e.target.value as any)}
-                  className="w-full text-xs bg-white border border-gray-200 rounded-lg p-2 focus:border-indigo-500 focus:outline-none"
-                >
-                  <option value="markdown">Markdown (.md)</option>
-                  <option value="text">Plain Text (.txt)</option>
-                  <option value="json">Structured JSON (.json)</option>
-                  <option value="pdf">Secured Doc (.pdf)</option>
-                  <option value="spreadsheet">Parity Sheet (.csv)</option>
-                </select>
-              </div>
-            </div>
-
-            {/* Tag system */}
-            <div className="flex flex-col gap-1.5 border-t border-gray-200/50 pt-4">
-              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1">
-                <Tag className="h-3 w-3" /> Document Labels
-              </span>
-              
-              {/* Quick Tags List */}
-              <div className="flex flex-wrap gap-1 mt-1 max-h-24 overflow-y-auto pb-1">
-                {tags.length > 0 ? (
-                  tags.map(t => (
-                    <span 
-                      key={t} 
-                      className="inline-flex items-center gap-1 bg-white border border-gray-200 text-gray-600 text-[10px] pl-2 pr-1 py-0.5 rounded-md hover:bg-red-50 hover:border-red-100 hover:text-red-600 transition-colors cursor-pointer group"
-                      onClick={() => handleRemoveTag(t)}
-                      title="Click to remove"
-                    >
-                      {t}
-                      <X className="h-2.5 w-2.5 text-gray-400 group-hover:text-red-500" />
-                    </span>
-                  ))
-                ) : (
-                  <span className="text-[10px] text-gray-400 italic">No labels assigned yet.</span>
+            {/* TAB SELECTOR */}
+            <div className="flex bg-gray-200/55 p-1 rounded-xl gap-1 mb-4 select-none shrink-0 border border-gray-200/20">
+              <button
+                id="sidebar-tab-metadata"
+                onClick={() => setActiveSidebarTab('metadata')}
+                className={`flex-1 py-1.5 px-2 text-xs font-semibold rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                  activeSidebarTab === 'metadata'
+                    ? 'bg-white text-gray-800 shadow-sm'
+                    : 'text-gray-550 hover:text-gray-900 hover:bg-white/40'
+                }`}
+              >
+                <Tag className="h-3.5 w-3.5" />
+                Properties
+              </button>
+              <button
+                id="sidebar-tab-history"
+                onClick={() => setActiveSidebarTab('history')}
+                className={`flex-1 py-1.5 px-2 text-xs font-semibold rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                  activeSidebarTab === 'history'
+                    ? 'bg-white text-gray-800 shadow-sm'
+                    : 'text-gray-550 hover:text-gray-900 hover:bg-white/40'
+                }`}
+              >
+                <History className="h-3.5 w-3.5" />
+                History
+                {docVersions.length > 0 && (
+                  <span className="bg-indigo-50 text-indigo-750 font-mono text-[9px] px-1.5 py-0.5 rounded-md font-bold leading-none">
+                    {docVersions.length}
+                  </span>
                 )}
-              </div>
-
-              {/* Add tag form */}
-              <form onSubmit={handleAddTag} className="flex gap-1.5 mt-1.5">
-                <input
-                  id="editor-tag-input"
-                  type="text"
-                  placeholder="Add custom label..."
-                  value={tagInput}
-                  onChange={(e) => setTagInput(e.target.value)}
-                  className="flex-grow text-xs bg-white border border-gray-200 rounded-lg px-2.5 py-1.5 focus:border-indigo-500 focus:outline-none"
-                />
-                <button
-                  id="editor-add-tag-btn"
-                  type="submit"
-                  className="px-2.5 py-1.5 bg-gray-200 hover:bg-gray-300 text-gray-700 text-xs font-semibold rounded-lg transition-colors cursor-pointer"
-                >
-                  Add
-                </button>
-              </form>
+              </button>
             </div>
 
-            {/* Telemetry info */}
-            <div className="flex flex-col gap-2.5 border-t border-gray-200/50 pt-4 mt-auto bg-white/50 p-3 rounded-2xl border border-gray-200/40 font-mono">
-              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1">
-                <Info className="h-3 w-3 text-indigo-500" /> Document Metrics
-              </span>
-              <div className="grid grid-cols-2 gap-2 text-[10px] text-gray-500 leading-none">
-                <div className="flex flex-col bg-white p-1.5 border border-gray-100 rounded-lg">
-                  <span className="text-gray-400 mb-1">Words</span>
-                  <span className="font-semibold text-gray-750">{wordCount}</span>
+            {activeSidebarTab === 'metadata' ? (
+              <div className="flex flex-col gap-5 flex-grow select-none">
+                {/* Classification (Shelf & Type Category) */}
+                <div className="flex flex-col gap-1.5">
+                  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Classification</span>
+                  
+                  {/* Shelf Selection */}
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[10px] text-gray-400 flex items-center gap-1">
+                      <Folder className="h-3 w-3" /> Shelf row
+                    </label>
+                    <select
+                      id="editor-shelf-select"
+                      value={category}
+                      onChange={(e) => setCategory(e.target.value)}
+                      className="w-full text-xs bg-white border border-gray-200 rounded-lg p-2 focus:border-indigo-500 focus:outline-none"
+                    >
+                      {shelves.map(s => (
+                        <option key={s.id} value={s.id}>{s.name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Type Selection */}
+                  <div className="flex flex-col gap-1 mt-2">
+                    <label className="text-[10px] text-gray-400">File Signature</label>
+                    <select
+                      id="editor-type-select"
+                      value={type}
+                      onChange={(e) => setType(e.target.value as any)}
+                      className="w-full text-xs bg-white border border-gray-200 rounded-lg p-2 focus:border-indigo-500 focus:outline-none"
+                    >
+                      <option value="markdown">Markdown (.md)</option>
+                      <option value="text">Plain Text (.txt)</option>
+                      <option value="json">Structured JSON (.json)</option>
+                      <option value="pdf">Secured Doc (.pdf)</option>
+                      <option value="spreadsheet">Parity Sheet (.csv)</option>
+                    </select>
+                  </div>
                 </div>
-                <div className="flex flex-col bg-white p-1.5 border border-gray-100 rounded-lg">
-                  <span className="text-gray-400 mb-1">Characters</span>
-                  <span className="font-semibold text-gray-750">{charCount}</span>
+
+                {/* Tag system */}
+                <div className="flex flex-col gap-1.5 border-t border-gray-250/30 pt-4">
+                  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1">
+                    <Tag className="h-3 w-3" /> Document Labels
+                  </span>
+                  
+                  {/* Quick Tags List */}
+                  <div className="flex flex-wrap gap-1 mt-1 max-h-24 overflow-y-auto pb-1">
+                    {tags.length > 0 ? (
+                      tags.map(t => (
+                        <span 
+                          key={t} 
+                          className="inline-flex items-center gap-1 bg-white border border-gray-200 text-gray-600 text-[10px] pl-2 pr-1 py-0.5 rounded-md hover:bg-red-50 hover:border-red-100 hover:text-red-700 transition-colors cursor-pointer group"
+                          onClick={() => handleRemoveTag(t)}
+                          title="Click to remove"
+                        >
+                          {t}
+                          <X className="h-2.5 w-2.5 text-gray-400 group-hover:text-red-500" />
+                        </span>
+                      ))
+                    ) : (
+                      <span className="text-[10px] text-gray-400 italic">No labels assigned yet.</span>
+                    )}
+                  </div>
+
+                  {/* Add tag form */}
+                  <form onSubmit={handleAddTag} className="flex gap-1.5 mt-1.5">
+                    <input
+                      id="editor-tag-input"
+                      type="text"
+                      placeholder="Add custom label..."
+                      value={tagInput}
+                      onChange={(e) => setTagInput(e.target.value)}
+                      className="flex-grow text-xs bg-white border border-gray-200 rounded-lg px-2.5 py-1.5 focus:border-indigo-500 focus:outline-none"
+                    />
+                    <button
+                      id="editor-add-tag-btn"
+                      type="submit"
+                      className="px-2.5 py-1.5 bg-gray-200 hover:bg-gray-300 text-gray-700 text-xs font-semibold rounded-lg transition-colors cursor-pointer"
+                    >
+                      Add
+                    </button>
+                  </form>
                 </div>
-                <div className="flex flex-col bg-white p-1.5 border border-gray-100 rounded-lg">
-                  <span className="text-gray-400 mb-1">Total Lines</span>
-                  <span className="font-semibold text-gray-750">{lineCount}</span>
-                </div>
-                <div className="flex flex-col bg-white p-1.5 border border-gray-100 rounded-lg">
-                  <span className="text-gray-400 mb-1">Reading Time</span>
-                  <span className="font-semibold text-gray-750 flex items-center gap-0.5"><Clock className="h-2.5 w-2.5 text-gray-400" /> {readingTime} min</span>
+
+                {/* Telemetry info */}
+                <div className="flex flex-col gap-2.5 border-t border-gray-250/30 pt-4 mt-auto bg-white/50 p-3 rounded-2xl border border-gray-200/40 font-mono">
+                  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1">
+                    <Info className="h-3 w-3 text-indigo-550" /> Document Metrics
+                  </span>
+                  <div className="grid grid-cols-2 gap-2 text-[10px] text-gray-500 leading-none">
+                    <div className="flex flex-col bg-white p-1.5 border border-gray-100 rounded-lg">
+                      <span className="text-gray-405 mb-1">Words</span>
+                      <span className="font-semibold text-gray-750">{wordCount}</span>
+                    </div>
+                    <div className="flex flex-col bg-white p-1.5 border border-gray-100 rounded-lg">
+                      <span className="text-gray-405 mb-1">Characters</span>
+                      <span className="font-semibold text-gray-750">{charCount}</span>
+                    </div>
+                    <div className="flex flex-col bg-white p-1.5 border border-gray-100 rounded-lg">
+                      <span className="text-gray-405 mb-1">Total Lines</span>
+                      <span className="font-semibold text-gray-750">{lineCount}</span>
+                    </div>
+                    <div className="flex flex-col bg-white p-1.5 border border-gray-100 rounded-lg">
+                      <span className="text-gray-405 mb-1">Reading Time</span>
+                      <span className="font-semibold text-gray-750 flex items-center gap-0.5"><Clock className="h-2.5 w-2.5 text-gray-400" /> {readingTime} min</span>
+                    </div>
+                  </div>
                 </div>
               </div>
-            </div>
+            ) : (
+              <div className="flex flex-col gap-3 flex-grow overflow-hidden select-none">
+                <div className="flex flex-col">
+                  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Revision History</span>
+                  <p className="text-[10px] text-gray-450 leading-tight mt-1">
+                    Every save adds an immutable state snapshot. Open comparison logs to view changes line-by-line.
+                  </p>
+                </div>
 
+                <div className="flex-1 overflow-y-auto pr-1 py-1 flex flex-col gap-2.5 max-h-[52vh] [scrollbar-width:thin]">
+                  {docVersions.slice().reverse().map((ver) => {
+                    const isActiveVer = ver.title === title && ver.content === content && ver.type === type && JSON.stringify(ver.tags) === JSON.stringify(tags);
+                    const dateFormatted = new Date(ver.updatedAt).toLocaleDateString('en-US', {
+                      month: 'short',
+                      day: 'numeric',
+                      hour: '2-digit',
+                      minute: '2-digit'
+                    });
+
+                    return (
+                      <div 
+                        key={ver.id || ver.versionNumber}
+                        className={`p-3 rounded-2xl border transition-all flex flex-col gap-1.5 bg-white ${
+                          isActiveVer 
+                            ? 'border-indigo-300 ring-2 ring-indigo-50/50 shadow-xs' 
+                            : 'border-gray-200/80 hover:border-gray-300 hover:shadow-xs'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-1.5">
+                          <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md font-mono ${
+                            isActiveVer 
+                              ? 'bg-indigo-50 text-indigo-700' 
+                              : 'bg-gray-100 text-gray-600'
+                          }`}>
+                            Revision v{ver.versionNumber}
+                          </span>
+                          <span className="text-[9px] text-gray-400 font-mono">
+                            {(ver.size / 1024).toFixed(2)} KB
+                          </span>
+                        </div>
+
+                        <div className="flex flex-col select-text">
+                          <p className="text-xs font-semibold text-gray-800 break-words leading-tight capitalize">
+                            {ver.changeSummary || `Update ${ver.versionNumber}`}
+                          </p>
+                          <span className="text-[9px] text-gray-400 font-mono font-medium mt-1 inline-flex items-center gap-0.5">
+                            <Clock className="h-2.5 w-2.5" /> {dateFormatted}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-2 mt-1.5 pt-2 border-t border-dashed border-gray-100">
+                          <button
+                            id={`show-diff-${ver.id || ver.versionNumber}`}
+                            onClick={() => {
+                              setSelectedVersionForDiff(ver);
+                              setShowDiffModal(true);
+                            }}
+                            className="text-[10px] text-indigo-650 bg-indigo-50 hover:bg-indigo-100 px-2.5 py-1.5 rounded-lg font-bold cursor-pointer transition-all flex items-center gap-0.5"
+                          >
+                            Compare
+                          </button>
+
+                          {!isActiveVer && (
+                            <button
+                              id={`restore-ver-${ver.id || ver.versionNumber}`}
+                              onClick={() => {
+                                if (confirm(`Revert document contents back to Revision Version ${ver.versionNumber}? Any unsaved changes on your editor will be replaced.`)) {
+                                  setTitle(ver.title);
+                                  setContent(ver.content);
+                                  setType(ver.type);
+                                  setTags(ver.tags);
+
+                                  // Instantly save/commit the reverted values directly
+                                  onSave(document.id, {
+                                    title: ver.title,
+                                    content: ver.content,
+                                    type: ver.type,
+                                    tags: ver.tags,
+                                    size: ver.size,
+                                    updatedAt: new Date().toISOString()
+                                  }, `Restored to Revision Version ${ver.versionNumber}`);
+
+                                  setIsSaved(true);
+                                }
+                              }}
+                              className="text-[10px] text-emerald-700 bg-emerald-50 hover:bg-emerald-100 px-2.5 py-1.5 rounded-lg font-bold cursor-pointer transition-all flex items-center gap-0.5 ml-auto"
+                            >
+                              <RotateCcw className="h-2.5 w-2.5" /> Revert
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
+
         </div>
       </div>
-    </motion.div>
+      </motion.div>
+
+      {/* MODAL 1: REVISION SUMMARY CHRONOLOGY COMMIT CONFIRM POPUP */}
+      <AnimatePresence>
+        {showSaveConfirm && (
+          <div className="fixed inset-0 bg-gray-950/65 backdrop-blur-sm flex items-center justify-center p-4 z-[75] select-none">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 15 }}
+              className="bg-white rounded-3xl border border-gray-100 shadow-2xl p-6 w-full max-w-sm flex flex-col gap-4 select-none"
+            >
+              <div className="flex items-center gap-2.5">
+                <div className="p-2.5 bg-indigo-50 rounded-2xl text-indigo-600">
+                  <History className="h-5 w-5 animate-spin" style={{ animationDuration: '4s' }} />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-gray-900 leading-tight">Commit Revision Log</h3>
+                  <p className="text-xs text-gray-400">Describe what has been modified</p>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <label className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Revision Summary / Note</label>
+                <input
+                  id="commit-message-input"
+                  type="text"
+                  value={changeDescription}
+                  onChange={(e) => setChangeDescription(e.target.value)}
+                  placeholder="e.g. Updated polymer elasticity formula"
+                  className="w-full text-xs font-semibold bg-gray-50 border border-gray-200 hover:border-gray-250 focus:bg-white focus:border-indigo-500 focus:outline-none rounded-xl px-3.5 py-2.5 transition-all"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      handleConfirmSave(changeDescription);
+                    }
+                  }}
+                  autoFocus
+                />
+              </div>
+
+              <div className="flex items-center gap-2 mt-1">
+                <button
+                  id="commit-cancel-btn"
+                  onClick={() => setShowSaveConfirm(false)}
+                  className="flex-1 py-2 rounded-xl text-xs font-semibold bg-gray-100 hover:bg-gray-200 text-gray-600 transition-all cursor-pointer text-center"
+                >
+                  Cancel
+                </button>
+                <button
+                  id="commit-confirm-btn"
+                  onClick={() => handleConfirmSave(changeDescription)}
+                  className="flex-grow py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white shadow-md shadow-indigo-150 transition-all cursor-pointer text-center"
+                >
+                  {changeDescription.trim() ? 'Commit & Save' : 'Instant Save'}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* MODAL 2: DIFF COMPARATOR */}
+      <AnimatePresence>
+        {showDiffModal && selectedVersionForDiff && (
+          <div className="fixed inset-0 bg-gray-950/65 backdrop-blur-sm flex items-center justify-center p-6 z-[70] select-none">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.98, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.98, y: 15 }}
+              className="bg-white rounded-3xl border border-gray-100 shadow-2xl w-full max-w-4xl h-[80vh] flex flex-col overflow-hidden"
+            >
+              {/* Header */}
+              <div className="bg-gray-50 border-b border-gray-150 px-6 py-4 flex items-center justify-between select-none">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl">
+                    <History className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-bold text-indigo-500 uppercase tracking-widest leading-none">VCS Change Diff Tool</span>
+                    <h2 className="text-sm font-bold text-gray-800 leading-none mt-1">
+                      Revision Version {selectedVersionForDiff.versionNumber} Comparisons
+                    </h2>
+                  </div>
+                </div>
+                <button
+                  id="close-diff-viewer"
+                  onClick={() => {
+                    setShowDiffModal(false);
+                    setSelectedVersionForDiff(null);
+                  }}
+                  className="p-1.5 hover:bg-gray-200/60 rounded-xl text-gray-400 hover:text-gray-650 transition-colors cursor-pointer"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              {/* Revision commit meta specs banner */}
+              <div className="bg-amber-500/[0.04] border-b border-amber-500/10 px-6 py-3.5 flex items-center justify-between text-xs select-none">
+                <div className="flex flex-col gap-0.5 max-w-md">
+                  <span className="text-[9px] font-bold text-amber-500 uppercase tracking-wider">Comment/Summary Description</span>
+                  <span className="font-bold text-gray-800 break-words text-sm line-clamp-1">
+                    "{selectedVersionForDiff.changeSummary || `Update ${selectedVersionForDiff.versionNumber}`}"
+                  </span>
+                </div>
+                <div className="flex flex-col text-right">
+                  <span className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Modified Time</span>
+                  <span className="font-mono text-[11px] font-semibold text-gray-700">
+                    {new Date(selectedVersionForDiff.updatedAt).toLocaleDateString('en-US', {
+                      month: 'short',
+                      day: 'numeric',
+                      year: 'numeric',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                      second: '2-digit'
+                    })}
+                  </span>
+                </div>
+              </div>
+
+              {/* Diff Code Scroll Core container */}
+              <div className="flex-1 overflow-hidden p-6 bg-gray-50 flex flex-col gap-4">
+                <div className="bg-white rounded-2xl border border-gray-200 flex flex-col overflow-hidden flex-1 shadow-xs">
+                  
+                  {/* Diff label details */}
+                  <div className="bg-gray-55/65 px-4 py-2.5 border-b border-gray-150 flex items-center justify-between select-none shrink-0">
+                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Line-by-Line Changes</span>
+                    <div className="flex gap-3 text-[10px] font-bold">
+                      <span className="flex items-center gap-1 text-rose-600 bg-rose-50 px-2 py-0.5 rounded-md"><span className="h-2 w-2 rounded bg-rose-500" /> Deleted</span>
+                      <span className="flex items-center gap-1 text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-md"><span className="h-2 w-2 rounded bg-emerald-500" /> Added</span>
+                    </div>
+                  </div>
+
+                  {/* Lines render container */}
+                  <div className="flex-1 overflow-y-auto p-4 font-mono text-[11px] leading-relaxed divide-y divide-gray-100 bg-gray-950 text-gray-100 selection:bg-gray-800 selection:text-white [scrollbar-width:thin]">
+                    {(() => {
+                      const prevVerNumber = selectedVersionForDiff.versionNumber - 1;
+                      const baseCode = docVersions.find(v => v.versionNumber === prevVerNumber)?.content || '';
+                      const diffList = computeLineDiff(baseCode, selectedVersionForDiff.content);
+
+                      return diffList.map((chunk, chunkIdx) => {
+                        const isAdded = chunk.type === 'added';
+                        const isDeleted = chunk.type === 'removed';
+
+                        return (
+                          <div 
+                            key={chunkIdx}
+                            className={`flex items-start px-3 py-1 font-mono hover:bg-gray-900 border-l-4 transition-all ${
+                              isAdded 
+                                ? 'bg-emerald-950/40 text-emerald-400 border-emerald-500' 
+                                : isDeleted 
+                                ? 'bg-rose-950/40 text-rose-400 border-rose-500 line-through decoration-rose-500/50' 
+                                : 'text-gray-300 border-transparent'
+                            }`}
+                          >
+                            <span className="w-6 shrink-0 opacity-40 font-bold select-none text-right pr-2">
+                              {isAdded ? '+' : isDeleted ? '-' : ' '}
+                            </span>
+                            <span className="break-all whitespace-pre-wrap flex-1">{chunk.value || ' '}</span>
+                          </div>
+                        );
+                      });
+                    })()}
+                  </div>
+
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+    </>
   );
 }
