@@ -30,6 +30,7 @@ import DocumentCard from './components/DocumentCard';
 import DocumentEditor from './components/DocumentEditor';
 import DashboardStats from './components/DashboardStats';
 import UploadModal from './components/UploadModal';
+import { DocumentSearchIndex } from './utils/searchIndex';
 
 export default function App() {
   // --- Persistent Storage State ---
@@ -290,6 +291,35 @@ Enter standard paragraphs or lists...`,
     logAction(title, 'upload', uid);
   };
 
+  // Dynamically provision document from clicked Wiki link ("red links")
+  const handleCreateDocFromLink = (title: string) => {
+    const uid = `doc-${Date.now()}`;
+    const targetShelf = shelves[0] || { id: 'shelf-repetitive-bounce', color: 'indigo' };
+    const newDoc: Document = {
+      id: uid,
+      title,
+      content: `# ${title}\nThis document was created dynamically via a wiki-link.\n\nEdit here to configure elastomer bounce, deeper parity systems, or platform release plans.`,
+      type: 'markdown',
+      size: 140,
+      category: targetShelf.id,
+      tags: ['Wiki', 'Draft'],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      isFavorite: false,
+      isArchived: false,
+      customPreviewColor: targetShelf.color === 'emerald' ? '#10b981' : targetShelf.color === 'teal' ? '#14b5a6' : targetShelf.color === 'violet' ? '#8b5cf6' : '#3b82f6',
+    };
+
+    setDocuments(prev => {
+      const next = [...prev, newDoc];
+      // Save directly to localStorage immediately so that it is available to the wiki link resolver
+      localStorage.setItem('doc_manager_documents', JSON.stringify(next));
+      return next;
+    });
+    logAction(title, 'create', uid);
+    setActiveDoc(newDoc); // Automatically transition to editor of newly spawned wiki doc
+  };
+
   // --- Shelf row operations ---
   const handleCreateShelf = (e: React.FormEvent) => {
     e.preventDefault();
@@ -342,29 +372,35 @@ Enter standard paragraphs or lists...`,
     new Set(documents.filter(d => !d.isArchived).flatMap(d => d.tags))
   );
 
-  // --- Filtering calculations ---
-  const filteredDocs = documents.filter(doc => {
-    // Basic Trash bin allocation
-    if (activeTab === 'trash') return doc.isArchived;
-    if (doc.isArchived) return false;
-
-    // Favorited status
-    if (activeTab === 'favorites' && !doc.isFavorite) return false;
-
-    // Search query matching (matches title or tags)
-    if (searchQuery.trim()) {
-      const matchText = searchQuery.toLowerCase();
-      const matchTitle = doc.title.toLowerCase().includes(matchText);
-      const matchContent = doc.content.toLowerCase().includes(matchText);
-      const matchTag = doc.tags.some(t => t.toLowerCase().includes(matchText));
-      if (!matchTitle && !matchContent && !matchTag) return false;
+  // --- Filtering & Ranked Search Indexing calculations ---
+  const filteredDocs = (() => {
+    let baseDocs = documents;
+    
+    // 1. Filter by category/trash tab
+    if (activeTab === 'trash') {
+      baseDocs = documents.filter(d => d.isArchived);
+    } else {
+      baseDocs = documents.filter(d => !d.isArchived);
+      
+      // 2. Filter by favorites tab
+      if (activeTab === 'favorites') {
+        baseDocs = baseDocs.filter(d => d.isFavorite);
+      }
     }
 
-    // Active Selected tag
-    if (selectedTag && !doc.tags.includes(selectedTag)) return false;
+    // 3. Filter by selected label tag
+    if (selectedTag) {
+      baseDocs = baseDocs.filter(d => d.tags.includes(selectedTag));
+    }
 
-    return true;
-  });
+    // 4. Ranked prefix-matching Full-Text Search (FTS)
+    if (searchQuery.trim()) {
+      const ftsIndex = new DocumentSearchIndex(baseDocs);
+      return ftsIndex.search(searchQuery).map(res => res.document);
+    }
+
+    return baseDocs;
+  })();
 
   return (
     <div id="document-manager-root" className="min-h-screen bg-[#FDFDFD] text-gray-800 flex flex-col md:flex-row font-sans selection:bg-indigo-100 antialiased">
@@ -817,6 +853,9 @@ Enter standard paragraphs or lists...`,
               setAutoRunSimulator(false);
             }}
             initialShowSimulator={autoRunSimulator}
+            documents={documents}
+            onOpenDoc={handleOpenDoc}
+            onCreateDocFromLink={handleCreateDocFromLink}
           />
         )}
       </AnimatePresence>

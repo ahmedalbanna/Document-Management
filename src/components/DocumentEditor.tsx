@@ -31,6 +31,9 @@ interface DocumentEditorProps {
   onSave: (docId: string, updates: Partial<Document>, changeSummary?: string) => void;
   onClose: () => void;
   initialShowSimulator?: boolean;
+  documents: Document[];
+  onOpenDoc: (doc: Document) => void;
+  onCreateDocFromLink: (title: string) => void;
 }
 
 export default function DocumentEditor({
@@ -39,6 +42,9 @@ export default function DocumentEditor({
   onSave,
   onClose,
   initialShowSimulator = false,
+  documents,
+  onOpenDoc,
+  onCreateDocFromLink,
 }: DocumentEditorProps) {
   const [title, setTitle] = useState(document.title);
   const [content, setContent] = useState(document.content);
@@ -50,12 +56,108 @@ export default function DocumentEditor({
   const [isSaved, setIsSaved] = useState<boolean>(true);
   const [showSimulator, setShowSimulator] = useState<boolean>(initialShowSimulator);
 
+  const [autocompleteState, setAutocompleteState] = useState<{
+    show: boolean;
+    query: string;
+    startIndex: number;
+    endIndex: number;
+    focusedIndex: number;
+  }>({
+    show: false,
+    query: '',
+    startIndex: -1,
+    endIndex: -1,
+    focusedIndex: 0,
+  });
+
+  const handleSelectDocumentLink = (docTitle: string) => {
+    const textarea = window.document.getElementById('editor-textarea') as HTMLTextAreaElement;
+    if (!textarea) return;
+    
+    const start = autocompleteState.startIndex;
+    const end = textarea.selectionStart;
+    
+    const before = content.slice(0, start);
+    const after = content.slice(end);
+    const insertText = `[[${docTitle}]]`;
+    
+    const newContent = before + insertText + after;
+    setContent(newContent);
+    setIsSaved(false);
+    setAutocompleteState({ show: false, query: '', startIndex: -1, endIndex: -1, focusedIndex: 0 });
+    
+    // Refocus and place cursor after the inserted link
+    setTimeout(() => {
+      textarea.focus();
+      const newCursorPos = start + insertText.length;
+      textarea.setSelectionRange(newCursorPos, newCursorPos);
+    }, 50);
+  };
+
+  const handleTextareaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const val = e.target.value;
+    setContent(val);
+    setIsSaved(false);
+
+    const selectionStart = e.target.selectionStart;
+    const textBeforeCursor = val.slice(0, selectionStart);
+    const lastOpenDoubleBrace = textBeforeCursor.lastIndexOf('[[');
+    const lastCloseDoubleBrace = textBeforeCursor.lastIndexOf(']]');
+
+    if (lastOpenDoubleBrace !== -1 && lastOpenDoubleBrace > lastCloseDoubleBrace) {
+      const query = textBeforeCursor.slice(lastOpenDoubleBrace + 2);
+      if (!query.includes('\n')) {
+        setAutocompleteState({
+          show: true,
+          query,
+          startIndex: lastOpenDoubleBrace,
+          endIndex: selectionStart,
+          focusedIndex: 0,
+        });
+        return;
+      }
+    }
+    setAutocompleteState(prev => ({ ...prev, show: false }));
+  };
+
+  const handleTextareaKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (!autocompleteState.show) return;
+
+    // Filter suggestions
+    const suggestions = documents
+      .filter(d => d.id !== document.id && !d.isArchived)
+      .filter(d => d.title.toLowerCase().includes(autocompleteState.query.toLowerCase()));
+
+    if (suggestions.length === 0) return;
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setAutocompleteState(prev => ({
+        ...prev,
+        focusedIndex: (prev.focusedIndex + 1) % suggestions.length,
+      }));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setAutocompleteState(prev => ({
+        ...prev,
+        focusedIndex: (prev.focusedIndex - 1 + suggestions.length) % suggestions.length,
+      }));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      handleSelectDocumentLink(suggestions[autocompleteState.focusedIndex].title);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      setAutocompleteState(prev => ({ ...prev, show: false }));
+    }
+  };
+
   useEffect(() => {
     setTitle(document.title);
     setContent(document.content);
     setType(document.type);
     setCategory(document.category);
     setTags(document.tags);
+    setAutocompleteState({ show: false, query: '', startIndex: -1, endIndex: -1, focusedIndex: 0 });
   }, [document]);
 
   // Track changes to trigger Save warning
@@ -69,11 +171,31 @@ export default function DocumentEditor({
     setIsSaved(isUnchanged);
   }, [title, content, type, category, tags, document]);
 
-  const [activeSidebarTab, setActiveSidebarTab] = useState<'metadata' | 'history'>('metadata');
+  const [activeSidebarTab, setActiveSidebarTab] = useState<'metadata' | 'history' | 'backlinks'>('metadata');
   const [showSaveConfirm, setShowSaveConfirm] = useState(false);
   const [changeDescription, setChangeDescription] = useState('');
   const [selectedVersionForDiff, setSelectedVersionForDiff] = useState<DocumentVersion | null>(null);
   const [showDiffModal, setShowDiffModal] = useState(false);
+
+  const backlinks = documents.filter(doc => {
+    if (doc.id === document.id || doc.isArchived) return false;
+    
+    const searchTitle = `[[${document.title.toLowerCase()}]]`;
+    const searchId = `[[${document.id.toLowerCase()}]]`;
+    const contentLower = doc.content.toLowerCase();
+    
+    const hasTitleLink = contentLower.includes(searchTitle);
+    const hasIdLink = contentLower.includes(searchId) || contentLower.includes(`[[${document.id.toLowerCase()}|`);
+    
+    const regexWikiTitle = new RegExp(`\\[\\[${escapeRegExp(document.title)}\\|`, 'i');
+    const hasTitleWithLabel = regexWikiTitle.test(doc.content);
+    
+    return hasTitleLink || hasIdLink || hasTitleWithLabel;
+  });
+
+  function escapeRegExp(string: string) {
+    return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
 
   const handleSave = () => {
     setShowSaveConfirm(true);
@@ -129,36 +251,102 @@ export default function DocumentEditor({
       }];
 
   const renderTextWithInlineMath = (text: string) => {
-    if (!text.includes('$')) return <span>{text}</span>;
+    if (!text.includes('$') && !text.includes('[[')) {
+      return <span>{text}</span>;
+    }
     
-    const parts = [];
+    const parts: React.ReactNode[] = [];
     let currentIndex = 0;
     
     while (currentIndex < text.length) {
-      const startIdx = text.indexOf('$', currentIndex);
-      if (startIdx === -1) {
+      const nextMathIdx = text.indexOf('$', currentIndex);
+      const nextWikiIdx = text.indexOf('[[', currentIndex);
+      
+      if (nextMathIdx === -1 && nextWikiIdx === -1) {
         parts.push(text.slice(currentIndex));
         break;
       }
       
-      // Preceding text
-      if (startIdx > currentIndex) {
-        parts.push(text.slice(currentIndex, startIdx));
+      // Determine which token comes first
+      if (nextMathIdx !== -1 && (nextWikiIdx === -1 || nextMathIdx < nextWikiIdx)) {
+        // Math is first
+        if (nextMathIdx > currentIndex) {
+          parts.push(text.slice(currentIndex, nextMathIdx));
+        }
+        
+        const endMathIdx = text.indexOf('$', nextMathIdx + 1);
+        if (endMathIdx === -1) {
+          parts.push(text.slice(nextMathIdx));
+          break;
+        }
+        
+        const mathExpr = text.slice(nextMathIdx + 1, endMathIdx);
+        parts.push(
+          <MathRenderer key={`math-${nextMathIdx}`} math={mathExpr} block={false} />
+        );
+        currentIndex = endMathIdx + 1;
+      } else {
+        // Wiki link is first
+        if (nextWikiIdx > currentIndex) {
+          parts.push(text.slice(currentIndex, nextWikiIdx));
+        }
+        
+        const endWikiIdx = text.indexOf(']]', nextWikiIdx + 2);
+        if (endWikiIdx === -1) {
+          parts.push(text.slice(nextWikiIdx));
+          break;
+        }
+        
+        const linkRaw = text.slice(nextWikiIdx + 2, endWikiIdx);
+        let targetIdOrTitle = linkRaw;
+        let displayLabel = linkRaw;
+        
+        if (linkRaw.includes('|')) {
+          const partsSplit = linkRaw.split('|');
+          targetIdOrTitle = partsSplit[0].trim();
+          displayLabel = partsSplit[1].trim();
+        }
+        
+        // Find the document
+        const linkedDoc = documents.find(d => 
+          d.id === targetIdOrTitle || 
+          d.title.toLowerCase() === targetIdOrTitle.toLowerCase()
+        );
+        
+        if (linkedDoc) {
+          parts.push(
+            <button
+              key={`wiki-${nextWikiIdx}`}
+              type="button"
+              onClick={() => {
+                onOpenDoc(linkedDoc);
+              }}
+              className="inline-flex items-center gap-0.5 px-1.5 py-0.5 mx-0.5 rounded-md bg-indigo-50 border border-indigo-100 text-indigo-700 text-xs font-semibold hover:bg-indigo-100 transition-colors cursor-pointer select-text"
+              title={`Navigate to ${linkedDoc.title}`}
+            >
+              <ExternalLink className="h-2.5 w-2.5 inline" />
+              {displayLabel}
+            </button>
+          );
+        } else {
+          // "Red link" for non-existent page
+          parts.push(
+            <button
+              key={`wiki-missing-${nextWikiIdx}`}
+              type="button"
+              onClick={() => {
+                onCreateDocFromLink(targetIdOrTitle);
+              }}
+              className="inline-flex items-center gap-0.5 px-1.5 py-0.5 mx-0.5 rounded-md bg-red-55/60 border border-dashed border-red-200 text-red-600 text-xs font-medium hover:bg-red-50 transition-colors cursor-pointer select-text"
+              title={`Page "${targetIdOrTitle}" does not exist. Click to create.`}
+            >
+              <span className="text-red-400 font-bold font-mono">?</span>
+              {displayLabel}
+            </button>
+          );
+        }
+        currentIndex = endWikiIdx + 2;
       }
-      
-      // Find end delimiter
-      const endIdx = text.indexOf('$', startIdx + 1);
-      if (endIdx === -1) {
-        parts.push(text.slice(startIdx));
-        break;
-      }
-      
-      const mathExpr = text.slice(startIdx + 1, endIdx);
-      parts.push(
-        <MathRenderer key={startIdx} math={mathExpr} block={false} />
-      );
-      
-      currentIndex = endIdx + 1;
     }
     
     return (
@@ -434,14 +622,64 @@ export default function DocumentEditor({
           <div className="flex-1 flex overflow-hidden split-pane divide-x divide-gray-100">
             {/* LEFT: Plain Text Area (hidden in total previewMode) */}
             {!previewMode && (
-              <div className="flex-1 flex flex-col bg-white min-w-0 h-full">
+              <div className="flex-1 flex flex-col bg-white min-w-0 h-full relative">
                 <textarea
                   id="editor-textarea"
                   value={content}
-                  onChange={(e) => setContent(e.target.value)}
-                  className="flex-1 p-6 resize-none focus:outline-none text-sm text-gray-800 font-mono leading-relaxed bg-white placeholder-gray-300 overflow-y-auto"
-                  placeholder="Start writing... Supports markdown templates (# headers, - lists, tables, code)"
+                  onChange={handleTextareaChange}
+                  onKeyDown={handleTextareaKeyDown}
+                  className="flex-grow p-6 resize-none focus:outline-none text-sm text-gray-800 font-mono leading-relaxed bg-white placeholder-gray-300 overflow-y-auto"
+                  placeholder="Start writing... Type '[[' to link pages. Supports markdown templates (# headers, - lists, tables, code)"
                 />
+                
+                {/* Wiki Autocomplete popover */}
+                <AnimatePresence>
+                  {autocompleteState.show && (() => {
+                    const suggestions = documents
+                      .filter(d => d.id !== document.id && !d.isArchived)
+                      .filter(d => d.title.toLowerCase().includes(autocompleteState.query.toLowerCase()));
+
+                    if (suggestions.length === 0) return null;
+
+                    return (
+                      <motion.div
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: 10 }}
+                        className="absolute bottom-6 left-6 bg-white border border-gray-200 rounded-2xl shadow-xl p-3 z-30 w-72 max-h-60 flex flex-col overflow-hidden select-none"
+                      >
+                        <div className="text-[10px] uppercase font-bold text-gray-400 tracking-wider mb-2 flex items-center justify-between border-b border-gray-100 pb-1.5 shrink-0">
+                          <span>Autocomplete Wiki-Link</span>
+                          <span className="font-mono text-gray-300 font-normal">↑↓ Enter</span>
+                        </div>
+                        <div className="flex-grow overflow-y-auto pr-1 flex flex-col gap-1 [scrollbar-width:thin]">
+                          {suggestions.map((suggestion, idx) => {
+                            const isFocused = idx === autocompleteState.focusedIndex;
+                            return (
+                              <button
+                                key={suggestion.id}
+                                id={`autocomplete-item-${idx}`}
+                                type="button"
+                                onClick={() => handleSelectDocumentLink(suggestion.title)}
+                                onMouseEnter={() => setAutocompleteState(prev => ({ ...prev, focusedIndex: idx }))}
+                                className={`w-full text-left text-xs px-3 py-1.5 rounded-xl flex items-center justify-between transition-colors cursor-pointer ${
+                                  isFocused 
+                                    ? 'bg-indigo-50 text-indigo-750 font-semibold' 
+                                    : 'text-gray-600 hover:bg-gray-50'
+                                }`}
+                              >
+                                <span className="truncate pr-2">{suggestion.title}</span>
+                                <span className="text-[9px] font-mono opacity-50 bg-gray-100 px-1 py-0.2 rounded border shrink-0">
+                                  {suggestion.type}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </motion.div>
+                    );
+                  })()}
+                </AnimatePresence>
               </div>
             )}
 
@@ -488,19 +726,19 @@ export default function DocumentEditor({
               <button
                 id="sidebar-tab-metadata"
                 onClick={() => setActiveSidebarTab('metadata')}
-                className={`flex-1 py-1.5 px-2 text-xs font-semibold rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                className={`flex-1 py-1.5 px-2 text-xs font-semibold rounded-lg transition-all flex items-center justify-center gap-1 cursor-pointer ${
                   activeSidebarTab === 'metadata'
                     ? 'bg-white text-gray-800 shadow-sm'
                     : 'text-gray-550 hover:text-gray-900 hover:bg-white/40'
                 }`}
               >
                 <Tag className="h-3.5 w-3.5" />
-                Properties
+                Props
               </button>
               <button
                 id="sidebar-tab-history"
                 onClick={() => setActiveSidebarTab('history')}
-                className={`flex-1 py-1.5 px-2 text-xs font-semibold rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                className={`flex-1 py-1.5 px-2 text-xs font-semibold rounded-lg transition-all flex items-center justify-center gap-1 cursor-pointer ${
                   activeSidebarTab === 'history'
                     ? 'bg-white text-gray-800 shadow-sm'
                     : 'text-gray-550 hover:text-gray-900 hover:bg-white/40'
@@ -511,6 +749,23 @@ export default function DocumentEditor({
                 {docVersions.length > 0 && (
                   <span className="bg-indigo-50 text-indigo-750 font-mono text-[9px] px-1.5 py-0.5 rounded-md font-bold leading-none">
                     {docVersions.length}
+                  </span>
+                )}
+              </button>
+              <button
+                id="sidebar-tab-backlinks"
+                onClick={() => setActiveSidebarTab('backlinks')}
+                className={`flex-1 py-1.5 px-2 text-xs font-semibold rounded-lg transition-all flex items-center justify-center gap-1 cursor-pointer ${
+                  activeSidebarTab === 'backlinks'
+                    ? 'bg-white text-gray-800 shadow-sm'
+                    : 'text-gray-550 hover:text-gray-900 hover:bg-white/40'
+                }`}
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+                Links
+                {backlinks.length > 0 && (
+                  <span className="bg-indigo-50 text-indigo-750 font-mono text-[9px] px-1.5 py-0.5 rounded-md font-bold leading-none">
+                    {backlinks.length}
                   </span>
                 )}
               </button>
@@ -627,7 +882,7 @@ export default function DocumentEditor({
                   </div>
                 </div>
               </div>
-            ) : (
+            ) : activeSidebarTab === 'history' ? (
               <div className="flex flex-col gap-3 flex-grow overflow-hidden select-none">
                 <div className="flex flex-col">
                   <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Revision History</span>
@@ -721,6 +976,73 @@ export default function DocumentEditor({
                       </div>
                     );
                   })}
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-3 flex-grow overflow-hidden select-none">
+                <div className="flex flex-col">
+                  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Incoming References</span>
+                  <p className="text-[10px] text-gray-450 leading-tight mt-1">
+                    Other documents that link back to this card using wiki-links. Click on any to transition instantly.
+                  </p>
+                </div>
+
+                <div className="flex-1 overflow-y-auto pr-1 py-1 flex flex-col gap-2.5 max-h-[52vh] [scrollbar-width:thin]">
+                  {backlinks.length > 0 ? (
+                    backlinks.map((linkedDoc) => {
+                      // Generate a neat excerpt showing the context where this wiki link is located
+                      const contentLower = linkedDoc.content.toLowerCase();
+                      const termIdx = contentLower.indexOf('[[');
+                      let excerpt = '';
+                      if (termIdx !== -1) {
+                        const start = Math.max(0, termIdx - 40);
+                        const end = Math.min(linkedDoc.content.length, termIdx + 60);
+                        excerpt = '...' + linkedDoc.content.slice(start, end).replace(/\n/g, ' ') + '...';
+                      } else {
+                        excerpt = linkedDoc.content.slice(0, 80) + '...';
+                      }
+
+                      return (
+                        <div
+                          key={linkedDoc.id}
+                          onClick={() => onOpenDoc(linkedDoc)}
+                          className="p-3 rounded-2xl border border-gray-200/80 hover:border-indigo-300 hover:ring-2 hover:ring-indigo-50 bg-white transition-all flex flex-col gap-1.5 cursor-pointer"
+                        >
+                          <div className="flex items-center justify-between gap-1.5">
+                            <span className="text-xs font-bold text-gray-800 hover:text-indigo-650 truncate">
+                              {linkedDoc.title}
+                            </span>
+                            <span className="text-[9px] font-mono text-gray-400">
+                              {(linkedDoc.size / 1024).toFixed(2)} KB
+                            </span>
+                          </div>
+                          
+                          <p className="text-[10px] text-gray-500 font-mono italic leading-normal line-clamp-2">
+                            {excerpt}
+                          </p>
+                          
+                          <div className="flex gap-2 items-center mt-1 pt-1.5 border-t border-dashed border-gray-100 select-none">
+                            <span className="text-[9px] bg-indigo-50 text-indigo-750 px-1.5 py-0.5 rounded font-semibold capitalize">
+                              {linkedDoc.type}
+                            </span>
+                            <span className="text-[9px] text-gray-400 font-mono ml-auto">
+                              Click to navigate
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div className="py-12 flex flex-col items-center justify-center text-center gap-2 select-none border border-dashed border-gray-250 bg-white/50 rounded-2xl p-4">
+                      <ExternalLink className="h-6 w-6 text-gray-300 stroke-[1.5]" />
+                      <div className="flex flex-col px-4">
+                        <span className="text-xs font-semibold text-gray-500">No backlinks found</span>
+                        <span className="text-[10px] text-gray-400 mt-1">
+                          Type <code className="font-mono bg-gray-100 px-1 py-0.5 rounded font-bold">[[</code> in other documents and select this document to link them.
+                        </span>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
