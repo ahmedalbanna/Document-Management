@@ -17,6 +17,7 @@ interface ShelfRowProps {
   onAddDocToShelf: (shelfId: string) => void;
   onUpdateShelf: (shelfId: string, name: string, description: string, color: string) => void;
   onDeleteShelf: (shelfId: string) => void;
+  onRunDoc?: (doc: Document) => void;
 }
 
 const SHELF_COLORS = [
@@ -40,6 +41,7 @@ export default function ShelfRow({
   onAddDocToShelf,
   onUpdateShelf,
   onDeleteShelf,
+  onRunDoc,
 }: ShelfRowProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [isEditingShelf, setIsEditingShelf] = React.useState(false);
@@ -253,6 +255,7 @@ export default function ShelfRow({
                   onDelete={onDeleteDoc}
                   onMoveShelf={onMoveDocShelf}
                   onRename={onRenameDoc}
+                  onRun={onRunDoc}
                 />
               ))
             ) : (

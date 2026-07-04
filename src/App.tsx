@@ -44,6 +44,7 @@ export default function App() {
 
   // --- Modals Toggle state ---
   const [activeDoc, setActiveDoc] = useState<Document | null>(null);
+  const [autoRunSimulator, setAutoRunSimulator] = useState<boolean>(false);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [showStats, setShowStats] = useState(true);
 
@@ -113,6 +114,12 @@ export default function App() {
 
   // --- Document core actions ---
   const handleOpenDoc = (doc: Document) => {
+    setAutoRunSimulator(false);
+    setActiveDoc(doc);
+  };
+
+  const handleRunDocSimulator = (doc: Document) => {
+    setAutoRunSimulator(true);
     setActiveDoc(doc);
   };
 
@@ -624,6 +631,7 @@ Enter standard paragraphs or lists...`,
                     onAddDocToShelf={handleAddDocToShelf}
                     onUpdateShelf={handleUpdateShelf}
                     onDeleteShelf={handleDeleteShelf}
+                    onRunDoc={handleRunDocSimulator}
                   />
                 );
               })}
@@ -775,6 +783,7 @@ Enter standard paragraphs or lists...`,
                             onDelete={handleDeleteDoc}
                             onMoveShelf={handleMoveDocShelf}
                             onRename={handleRenameDoc}
+                            onRun={handleRunDocSimulator}
                           />
                         </div>
                       )}
@@ -803,7 +812,11 @@ Enter standard paragraphs or lists...`,
             document={activeDoc}
             shelves={shelves}
             onSave={handleSaveDocEdits}
-            onClose={() => setActiveDoc(null)}
+            onClose={() => {
+              setActiveDoc(null);
+              setAutoRunSimulator(false);
+            }}
+            initialShowSimulator={autoRunSimulator}
           />
         )}
       </AnimatePresence>

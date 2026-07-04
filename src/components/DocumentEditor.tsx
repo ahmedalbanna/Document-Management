@@ -16,16 +16,21 @@ import {
   Type,
   ExternalLink,
   History,
-  RotateCcw
+  RotateCcw,
+  Play,
+  Zap
 } from 'lucide-react';
 import { Document, Shelf, DocumentVersion } from '../types';
 import { computeLineDiff } from '../utils/diff';
+import MathRenderer from './MathRenderer';
+import MicroSimulator from './MicroSimulator';
 
 interface DocumentEditorProps {
   document: Document;
   shelves: Shelf[];
   onSave: (docId: string, updates: Partial<Document>, changeSummary?: string) => void;
   onClose: () => void;
+  initialShowSimulator?: boolean;
 }
 
 export default function DocumentEditor({
@@ -33,6 +38,7 @@ export default function DocumentEditor({
   shelves,
   onSave,
   onClose,
+  initialShowSimulator = false,
 }: DocumentEditorProps) {
   const [title, setTitle] = useState(document.title);
   const [content, setContent] = useState(document.content);
@@ -42,6 +48,7 @@ export default function DocumentEditor({
   const [tagInput, setTagInput] = useState('');
   const [previewMode, setPreviewMode] = useState<boolean>(false);
   const [isSaved, setIsSaved] = useState<boolean>(true);
+  const [showSimulator, setShowSimulator] = useState<boolean>(initialShowSimulator);
 
   useEffect(() => {
     setTitle(document.title);
@@ -121,110 +128,218 @@ export default function DocumentEditor({
         size: document.size,
       }];
 
-  // A ultra-responsive, beautiful custom text & markdown renderer
+  const renderTextWithInlineMath = (text: string) => {
+    if (!text.includes('$')) return <span>{text}</span>;
+    
+    const parts = [];
+    let currentIndex = 0;
+    
+    while (currentIndex < text.length) {
+      const startIdx = text.indexOf('$', currentIndex);
+      if (startIdx === -1) {
+        parts.push(text.slice(currentIndex));
+        break;
+      }
+      
+      // Preceding text
+      if (startIdx > currentIndex) {
+        parts.push(text.slice(currentIndex, startIdx));
+      }
+      
+      // Find end delimiter
+      const endIdx = text.indexOf('$', startIdx + 1);
+      if (endIdx === -1) {
+        parts.push(text.slice(startIdx));
+        break;
+      }
+      
+      const mathExpr = text.slice(startIdx + 1, endIdx);
+      parts.push(
+        <MathRenderer key={startIdx} math={mathExpr} block={false} />
+      );
+      
+      currentIndex = endIdx + 1;
+    }
+    
+    return (
+      <span>
+        {parts.map((p, i) => (
+          <React.Fragment key={i}>
+            {p}
+          </React.Fragment>
+        ))}
+      </span>
+    );
+  };
+
+  // A ultra-responsive, beautiful custom text & markdown renderer with live LaTeX Math rendering
   const renderMarkdown = (text: string) => {
     if (!text.trim()) return <p className="text-gray-400 italic">No content available. Type in the editor to populate.</p>;
 
     const lines = text.split('\n');
-    let inTable = false;
-    let tableHeaders: string[] = [];
+    const elements: React.ReactNode[] = [];
+    
+    let idx = 0;
+    while (idx < lines.length) {
+      const line = lines[idx];
+      const trimmed = line.trim();
+
+      // Multiline Block math: starting with $$
+      if (trimmed.startsWith('$$') && !trimmed.endsWith('$$', 2)) {
+        let mathContent = trimmed.slice(2);
+        let j = idx + 1;
+        while (j < lines.length) {
+          const nextTrimmed = lines[j].trim();
+          if (nextTrimmed.endsWith('$$')) {
+            mathContent += '\n' + nextTrimmed.slice(0, -2);
+            break;
+          } else {
+            mathContent += '\n' + lines[j];
+            j++;
+          }
+        }
+        elements.push(
+          <div key={idx} className="my-4 py-3 px-4 overflow-x-auto text-center bg-gray-50 rounded-2xl border border-gray-150/80">
+            <MathRenderer math={mathContent.trim()} block={true} />
+          </div>
+        );
+        idx = j + 1;
+        continue;
+      }
+
+      // Single-line Block math
+      if (trimmed.startsWith('$$') && trimmed.endsWith('$$')) {
+        const math = trimmed.slice(2, -2).trim();
+        elements.push(
+          <div key={idx} className="my-4 py-3 px-4 overflow-x-auto text-center bg-gray-50 rounded-2xl border border-gray-150/80">
+            <MathRenderer math={math} block={true} />
+          </div>
+        );
+        idx++;
+        continue;
+      }
+
+      // Code blocks
+      if (trimmed.startsWith('```')) {
+        let codeContent = '';
+        let j = idx + 1;
+        while (j < lines.length) {
+          if (lines[j].trim().startsWith('```')) {
+            break;
+          }
+          codeContent += lines[j] + '\n';
+          j++;
+        }
+        elements.push(
+          <pre key={idx} className="bg-gray-950 text-gray-150 font-mono text-[11px] p-4.5 rounded-2xl my-3 overflow-x-auto whitespace-pre leading-relaxed shadow-inner border border-gray-900">
+            <code>{codeContent}</code>
+          </pre>
+        );
+        idx = j + 1;
+        continue;
+      }
+
+      // Raw format data blocks
+      if (trimmed.startsWith('TIMESTAMP,') || trimmed.startsWith('{"simulation":')) {
+        elements.push(
+          <span key={idx} className="block bg-gray-55/80 text-gray-600 font-mono text-[10px] p-3 rounded-xl border border-gray-150 overflow-x-auto whitespace-pre my-2 select-text">
+            {trimmed}
+          </span>
+        );
+        idx++;
+        continue;
+      }
+
+      // Headers
+      if (trimmed.startsWith('# ')) {
+        elements.push(
+          <h1 key={idx} className="text-xl font-bold text-gray-900 border-b border-gray-100 pb-2 pt-4">
+            {renderTextWithInlineMath(trimmed.replace('# ', ''))}
+          </h1>
+        );
+        idx++;
+        continue;
+      }
+      if (trimmed.startsWith('## ')) {
+        elements.push(
+          <h2 key={idx} className="text-lg font-semibold text-gray-800 pt-3">
+            {renderTextWithInlineMath(trimmed.replace('## ', ''))}
+          </h2>
+        );
+        idx++;
+        continue;
+      }
+      if (trimmed.startsWith('### ')) {
+        elements.push(
+          <h3 key={idx} className="text-md font-semibold text-gray-850 pt-2">
+            {renderTextWithInlineMath(trimmed.replace('### ', ''))}
+          </h3>
+        );
+        idx++;
+        continue;
+      }
+
+      // Lists
+      if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
+        elements.push(
+          <div key={idx} className="flex items-start gap-2 pl-4">
+            <span className="text-indigo-500 font-bold mt-1.5">•</span>
+            <span className="text-gray-650">{renderTextWithInlineMath(trimmed.slice(2))}</span>
+          </div>
+        );
+        idx++;
+        continue;
+      }
+      
+      if (/^\d+\.\s/.test(trimmed)) {
+        const listNum = trimmed.match(/^\d+\./)?.[0];
+        const content = trimmed.replace(/^\d+\.\s/, '');
+        elements.push(
+          <div key={idx} className="flex items-start gap-2 pl-4">
+            <span className="text-indigo-600 font-mono font-medium text-xs mt-1">{listNum}</span>
+            <span className="text-gray-650">{renderTextWithInlineMath(content)}</span>
+          </div>
+        );
+        idx++;
+        continue;
+      }
+
+      // Tables (Render simply as structured key-value lines if basic)
+      if (trimmed.startsWith('|')) {
+        const cells = trimmed.split('|').map(c => c.trim()).filter(c => c !== '');
+        if (trimmed.includes('---')) {
+          idx++;
+          continue; // skip separator
+        }
+        elements.push(
+          <div key={idx} className="grid grid-cols-4 gap-3 bg-gray-50/70 py-1.5 px-3 border border-gray-100 rounded-xl text-xs font-mono">
+            {cells.map((cell, cidx) => (
+              <span key={cidx} className={idx === 1 ? "font-bold text-gray-700" : "text-gray-600"}>
+                {renderTextWithInlineMath(cell)}
+              </span>
+            ))}
+          </div>
+        );
+        idx++;
+        continue;
+      }
+
+      // Normal paragraphs
+      if (trimmed === '') {
+        elements.push(<div key={idx} className="h-2" />);
+      } else {
+        elements.push(
+          <p key={idx} className="text-gray-600 leading-relaxed">
+            {renderTextWithInlineMath(trimmed)}
+          </p>
+        );
+      }
+      idx++;
+    }
 
     return (
       <div className="prose prose-slate max-w-none text-sm text-gray-700 leading-relaxed font-sans space-y-3">
-        {lines.map((line, idx) => {
-          const trimmed = line.trim();
-
-          // Code block
-          if (trimmed.startsWith('```')) {
-            return (
-              <pre key={idx} className="bg-gray-900 text-gray-100 font-mono text-[11px] p-4 rounded-xl my-2 overflow-x-auto whitespace-pre">
-                <code>{lines.slice(idx + 1, idx + 4).join('\n')}</code>
-              </pre>
-            );
-          }
-          if (trimmed.startsWith('TIMESTAMP,') || trimmed.startsWith('{"simulation":')) {
-            // Treat as raw format data blocks
-            return (
-              <span key={idx} className="block bg-gray-50 text-gray-600 font-mono text-[10px] p-3 rounded-lg border border-gray-100 overflow-x-auto whitespace-pre">
-                {trimmed}
-              </span>
-            );
-          }
-
-          // Headers
-          if (trimmed.startsWith('# ')) {
-            return <h1 key={idx} className="text-xl font-bold text-gray-900 border-b border-gray-100 pb-2 pt-4">{trimmed.replace('# ', '')}</h1>;
-          }
-          if (trimmed.startsWith('## ')) {
-            return <h2 key={idx} className="text-lg font-semibold text-gray-800 pt-3">{trimmed.replace('## ', '')}</h2>;
-          }
-          if (trimmed.startsWith('### ')) {
-            return <h3 key={idx} className="text-md font-semibold text-gray-800 pt-2">{trimmed.replace('### ', '')}</h3>;
-          }
-
-          // Lists
-          if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
-            return (
-              <div key={idx} className="flex items-start gap-2 pl-4">
-                <span className="text-indigo-500 font-bold mt-1.5">•</span>
-                <span>{trimmed.slice(2)}</span>
-              </div>
-            );
-          }
-          
-          if (/^\d+\.\s/.test(trimmed)) {
-            const listNum = trimmed.match(/^\d+\./)?.[0];
-            const content = trimmed.replace(/^\d+\.\s/, '');
-            return (
-              <div key={idx} className="flex items-start gap-2 pl-4">
-                <span className="text-indigo-600 font-mono font-medium text-xs mt-1">{listNum}</span>
-                <span>{content}</span>
-              </div>
-            );
-          }
-
-          // Tables (Render simply as structured key-value lines if basic)
-          if (trimmed.startsWith('|')) {
-            const cells = trimmed.split('|').map(c => c.trim()).filter(c => c !== '');
-            if (trimmed.includes('---')) return null; // skip dividers
-            return (
-              <div key={idx} className="grid grid-cols-4 gap-3 bg-gray-50/70 py-1.5 px-3 border border-gray-100 rounded text-xs font-mono">
-                {cells.map((cell, cidx) => (
-                  <span key={cidx} className={idx === 1 ? "font-bold text-gray-700" : "text-gray-600"}>
-                    {cell}
-                  </span>
-                ))}
-              </div>
-            );
-          }
-
-          // Math mock or blocks
-          if (trimmed.startsWith('$$\\text{CoR}')) {
-            return (
-              <div key={idx} className="bg-indigo-50/50 text-indigo-800 rounded-xl p-4 text-center border border-indigo-100 font-mono text-xs my-2">
-                CoR (e) = vf / vi = √ ( h_bounce / h_drop )
-              </div>
-            );
-          }
-          if (trimmed.startsWith('$$h_n =')) {
-            return (
-              <div key={idx} className="bg-emerald-50/50 text-emerald-800 rounded-xl p-3 text-center border border-emerald-100 font-mono text-xs my-1">
-                h_n = h_0 * e^(2n)
-              </div>
-            );
-          }
-          if (trimmed.startsWith('$$P_{\\text{balance}}')) {
-            return (
-              <div key={idx} className="bg-violet-50/50 text-violet-800 rounded-xl p-3 text-center border border-violet-100 font-mono text-xs my-1">
-                P_balance = Σ |A_i - B_i| = 0
-              </div>
-            );
-          }
-
-          // Normal paragraphs
-          if (trimmed === '') return <div key={idx} className="h-2" />;
-          return <p key={idx} className="text-gray-600">{trimmed}</p>;
-        })}
+        {elements}
       </div>
     );
   };
@@ -338,6 +453,25 @@ export default function DocumentEditor({
                     <Sparkles className="h-3 w-3" /> Live Render Preview
                   </div>
                   <h1 className="text-2xl font-bold text-gray-850 mb-6 font-sans drop-shadow-sm">{title || 'Untitled'}</h1>
+                  {/* Interactive Playground Banner */}
+                  {(category === 'shelf-repetitive-bounce' || category === 'shelf-deep-parity' || category === 'shelf-even-product') && (
+                    <div className="bg-gradient-to-br from-indigo-50/60 to-purple-50/60 border border-indigo-100/40 rounded-2xl p-4 mb-6 flex items-center justify-between shadow-xs select-none">
+                      <div className="flex flex-col gap-0.5">
+                        <span className="text-[10px] uppercase tracking-wider font-extrabold text-indigo-600 flex items-center gap-1.5">
+                          <Zap className="h-3.5 w-3.5 fill-indigo-100 text-indigo-500 animate-pulse" /> Live Interactive Sandbox
+                        </span>
+                        <p className="text-xs text-indigo-950 font-bold mt-1">This document contains executable configurations.</p>
+                        <p className="text-[10px] text-indigo-600 font-medium">Run the mini client-side simulation playground.</p>
+                      </div>
+                      <button
+                        id="editor-launch-simulator"
+                        onClick={() => setShowSimulator(true)}
+                        className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-md shadow-indigo-150 transition-all cursor-pointer flex items-center gap-1.5 shrink-0"
+                      >
+                        <Play className="h-3 w-3 fill-current" /> Run Simulator
+                      </button>
+                    </div>
+                  )}
                   <div className="border-t border-gray-100 pt-6">
                     {renderMarkdown(content)}
                   </div>
@@ -762,6 +896,18 @@ export default function DocumentEditor({
               </div>
             </motion.div>
           </div>
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
+        {showSimulator && (
+          <MicroSimulator
+            document={document}
+            onClose={() => setShowSimulator(false)}
+            onUpdateContent={(newContent) => {
+              setContent(newContent);
+              setIsSaved(false);
+            }}
+          />
         )}
       </AnimatePresence>
     </>

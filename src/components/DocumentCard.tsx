@@ -13,7 +13,8 @@ import {
   FolderInput, 
   Calendar,
   Layers,
-  ArrowRight
+  ArrowRight,
+  Play
 } from 'lucide-react';
 import { Document, Shelf } from '../types';
 
@@ -26,6 +27,7 @@ interface DocumentCardProps {
   onDelete: (docId: string) => void;
   onMoveShelf: (docId: string, newShelfId: string) => void;
   onRename: (docId: string, newTitle: string) => void;
+  onRun?: (doc: Document) => void;
 }
 
 export default function DocumentCard({
@@ -36,6 +38,7 @@ export default function DocumentCard({
   onDelete,
   onMoveShelf,
   onRename,
+  onRun,
 }: DocumentCardProps) {
   const [isHovered, setIsHovered] = useState(false);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -96,6 +99,7 @@ export default function DocumentCard({
   };
 
   const currentShelf = shelves.find(s => s.id === document.category);
+  const isRunnable = document.category === 'shelf-repetitive-bounce' || document.category === 'shelf-deep-parity' || document.category === 'shelf-even-product';
 
   return (
     <motion.div
@@ -164,6 +168,21 @@ export default function DocumentCard({
 
         {/* Floating Quick Action Overlay */}
         <div className="absolute right-4 top-4 flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+          {isRunnable && (
+            <button
+              id={`run-btn-${document.id}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (onRun) onRun(document);
+                else onOpen(document);
+              }}
+              className="p-1.5 rounded-full bg-indigo-600 border border-indigo-650 text-white hover:bg-indigo-700 shadow-sm transition-colors cursor-pointer flex items-center justify-center"
+              title="Run Simulation Playground"
+            >
+              <Play className="h-3.5 w-3.5 fill-current" />
+            </button>
+          )}
+
           <button
             id={`fav-btn-${document.id}`}
             onClick={(e) => {
