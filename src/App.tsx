@@ -25,7 +25,7 @@ import {
 } from 'lucide-react';
 
 import JSZip from 'jszip';
-import { Document, Shelf, ActivityLog, DocumentType } from './types';
+import { Document, Shelf, ActivityLog, DocumentType, FilePermission, ShareSettings } from './types';
 import { INITIAL_SHELVES, INITIAL_DOCUMENTS } from './data/defaultData';
 import ShelfRow from './components/ShelfRow';
 import DocumentCard from './components/DocumentCard';
@@ -33,9 +33,13 @@ import DocumentEditor from './components/DocumentEditor';
 import DashboardStats from './components/DashboardStats';
 import UploadModal from './components/UploadModal';
 import MergeModal from './components/MergeModal';
+import ShareModal from './components/ShareModal';
 import { DocumentSearchIndex } from './utils/searchIndex';
 
 export default function App() {
+  // --- Active Persona Session State ---
+  const [currentUserEmail, setCurrentUserEmail] = useState<string>('ahmedalbanna966@gmail.com');
+
   // --- Persistent Storage State ---
   const [documents, setDocuments] = useState<Document[]>([]);
   const [shelves, setShelves] = useState<Shelf[]>([]);
@@ -51,6 +55,50 @@ export default function App() {
   const [autoRunSimulator, setAutoRunSimulator] = useState<boolean>(false);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [showStats, setShowStats] = useState(true);
+  const [sharingDoc, setSharingDoc] = useState<Document | null>(null);
+
+  const handleUpdatePermissions = (
+    docId: string,
+    shareSettings: ShareSettings,
+    permissions: FilePermission[]
+  ) => {
+    const updatedDocs = documents.map(doc => {
+      if (doc.id === docId) {
+        const updated = {
+          ...doc,
+          shareSettings,
+          permissions,
+        };
+        // Update the active doc if it is currently open in the editor
+        if (activeDoc && activeDoc.id === docId) {
+          setActiveDoc(updated);
+        }
+        return updated;
+      }
+      return doc;
+    });
+    setDocuments(updatedDocs);
+    localStorage.setItem('doc_manager_documents', JSON.stringify(updatedDocs));
+
+    // Log the share settings update
+    const targetDoc = documents.find(d => d.id === docId);
+    if (targetDoc) {
+      const newLog: ActivityLog = {
+        id: `log-share-${Date.now()}`,
+        documentId: docId,
+        documentTitle: targetDoc.title,
+        action: 'share',
+        timestamp: new Date().toISOString(),
+      };
+      setActivities(prev => {
+        const nextLogs = [newLog, ...prev];
+        localStorage.setItem('doc_manager_activities', JSON.stringify(nextLogs));
+        return nextLogs;
+      });
+    }
+    
+    setSharingDoc(null);
+  };
 
   // --- VCS & Selection states ---
   const [selectedDocIds, setSelectedDocIds] = useState<string[]>([]);
@@ -71,12 +119,17 @@ export default function App() {
 
   // Load state on startup
   useEffect(() => {
+    let currentDocs = INITIAL_DOCUMENTS;
     const savedDocs = localStorage.getItem('doc_manager_documents');
     const savedShelves = localStorage.getItem('doc_manager_shelves');
     const savedLogs = localStorage.getItem('doc_manager_activities');
 
-    if (savedDocs) setDocuments(JSON.parse(savedDocs));
-    else setDocuments(INITIAL_DOCUMENTS);
+    if (savedDocs) {
+      currentDocs = JSON.parse(savedDocs);
+      setDocuments(currentDocs);
+    } else {
+      setDocuments(INITIAL_DOCUMENTS);
+    }
 
     if (savedShelves) setShelves(JSON.parse(savedShelves));
     else setShelves(INITIAL_SHELVES);
@@ -93,6 +146,21 @@ export default function App() {
           timestamp: new Date().toISOString(),
         }
       ]);
+    }
+
+    // Parse query params for shared document access: ?sharedDocId=XXX
+    const params = new URLSearchParams(window.location.search);
+    const sharedDocId = params.get('sharedDocId');
+    if (sharedDocId) {
+      const doc = currentDocs.find(d => d.id === sharedDocId);
+      if (doc) {
+        setActiveDoc(doc);
+        const accessRole = params.get('accessRole');
+        if (accessRole) {
+          // Switch to Guest to demonstrate permission constraints
+          setCurrentUserEmail('guest@external.com');
+        }
+      }
     }
   }, []);
 
@@ -453,6 +521,10 @@ ${doc.content}`;
   };
 
   // --- Document core actions ---
+  const handleShareDoc = (doc: Document) => {
+    setSharingDoc(doc);
+  };
+
   const handleOpenDoc = (doc: Document) => {
     setAutoRunSimulator(false);
     setActiveDoc(doc);
@@ -898,16 +970,49 @@ Enter standard paragraphs or lists...`,
           </div>
         )}
 
-        {/* Micro profile card */}
-        <div className="mt-auto border-t border-gray-100 pt-4 flex flex-col gap-1.5">
-          <div className="flex items-center gap-2.5">
-            <div className="h-8 w-8 rounded-full bg-gray-100 border border-gray-200 flex items-center justify-center text-gray-600">
-              <User className="h-4 w-4" />
-            </div>
-            <div className="flex flex-col min-w-0">
-              <span className="text-[11px] font-semibold text-gray-800 truncate">ahmedalbanna966</span>
-              <span className="text-[9px] text-gray-400 truncate">ahmedalbanna966@gmail.com</span>
-            </div>
+        {/* Interactive Active Teammate Persona Selector */}
+        <div className="mt-auto border-t border-gray-100 pt-4 flex flex-col gap-2 bg-white/70 rounded-xl p-2.5 border border-gray-100 shadow-2xs select-none">
+          <div className="flex flex-col gap-0.5">
+            <span className="text-[9px] font-bold text-indigo-500 uppercase tracking-widest font-mono">Session Persona</span>
+            <span className="text-[9px] text-gray-400 leading-tight">Switch users to test file collaboration, sharing permissions, and read-only locks:</span>
+          </div>
+          <div className="relative">
+            <select
+              id="persona-switcher"
+              value={currentUserEmail}
+              onChange={(e) => {
+                setCurrentUserEmail(e.target.value);
+                const emailToName: Record<string, string> = {
+                  'ahmedalbanna966@gmail.com': 'Ahmed Albanna (Owner)',
+                  'sarah.dev@company.com': 'Sarah Jenkins (Editor)',
+                  'alex.manager@company.com': 'Alex Martinez (Viewer)',
+                  'guest@external.com': 'Public Guest (Viewer)'
+                };
+                const newName = emailToName[e.target.value] || e.target.value;
+                const newLog: ActivityLog = {
+                  id: `log-persona-${Date.now()}`,
+                  documentId: '',
+                  documentTitle: `Active persona switched to ${newName}`,
+                  action: 'edit',
+                  timestamp: new Date().toISOString(),
+                };
+                setActivities(prev => {
+                  const next = [newLog, ...prev];
+                  localStorage.setItem('doc_manager_activities', JSON.stringify(next));
+                  return next;
+                });
+              }}
+              className="w-full text-xs bg-gray-50 hover:bg-gray-100/80 border border-gray-200 text-gray-750 px-2.5 py-1.5 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer transition-colors font-semibold"
+            >
+              <option value="ahmedalbanna966@gmail.com">👤 Ahmed Albanna (Owner)</option>
+              <option value="sarah.dev@company.com">💻 Sarah Jenkins (Teammate - Editor)</option>
+              <option value="alex.manager@company.com">📈 Alex Martinez (Teammate - Viewer)</option>
+              <option value="guest@external.com">🌐 Public Guest (External View)</option>
+            </select>
+          </div>
+          <div className="flex items-center gap-1.5 text-[9px] text-gray-400 pl-0.5">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+            <span className="truncate font-mono">Current: {currentUserEmail}</span>
           </div>
         </div>
       </aside>
@@ -1029,6 +1134,8 @@ Enter standard paragraphs or lists...`,
                     onRunDoc={handleRunDocSimulator}
                     selectedDocIds={selectedDocIds}
                     onToggleSelectDoc={handleToggleSelectDoc}
+                    onShareDoc={handleShareDoc}
+                    currentUserEmail={currentUserEmail}
                   />
                 );
               })}
@@ -1183,6 +1290,8 @@ Enter standard paragraphs or lists...`,
                             onRun={handleRunDocSimulator}
                             selectedDocIds={selectedDocIds}
                             onToggleSelectDoc={(id, isShift) => handleToggleSelectDoc(id, isShift, filteredDocs)}
+                            onShare={handleShareDoc}
+                            currentUserEmail={currentUserEmail}
                           />
                         </div>
                       )}
@@ -1219,6 +1328,8 @@ Enter standard paragraphs or lists...`,
             documents={documents}
             onOpenDoc={handleOpenDoc}
             onCreateDocFromLink={handleCreateDocFromLink}
+            currentUserEmail={currentUserEmail}
+            onShare={handleShareDoc}
           />
         )}
       </AnimatePresence>
@@ -1308,6 +1419,17 @@ Enter standard paragraphs or lists...`,
               setMergeState(null);
             }}
             onCancel={() => setMergeState(null)}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* 9. SHARING & PERMISSIONS SETTINGS MODAL */}
+      <AnimatePresence>
+        {sharingDoc && (
+          <ShareModal
+            document={sharingDoc}
+            onClose={() => setSharingDoc(null)}
+            onUpdatePermissions={handleUpdatePermissions}
           />
         )}
       </AnimatePresence>

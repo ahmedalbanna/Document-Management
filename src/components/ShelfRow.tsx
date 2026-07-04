@@ -20,6 +20,8 @@ interface ShelfRowProps {
   onRunDoc?: (doc: Document) => void;
   selectedDocIds: string[];
   onToggleSelectDoc: (docId: string, isShift: boolean, shelfDocs?: Document[]) => void;
+  onShareDoc?: (doc: Document) => void;
+  currentUserEmail?: string;
 }
 
 const SHELF_COLORS = [
@@ -46,6 +48,8 @@ export default function ShelfRow({
   onRunDoc,
   selectedDocIds,
   onToggleSelectDoc,
+  onShareDoc,
+  currentUserEmail,
 }: ShelfRowProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [isEditingShelf, setIsEditingShelf] = useState(false);
@@ -493,6 +497,8 @@ export default function ShelfRow({
                     onRun={onRunDoc}
                     selectedDocIds={selectedDocIds}
                     onToggleSelectDoc={(id, isShift) => onToggleSelectDoc(id, isShift, documents)}
+                    onShare={onShareDoc}
+                    currentUserEmail={currentUserEmail}
                   />
                 ))}
 

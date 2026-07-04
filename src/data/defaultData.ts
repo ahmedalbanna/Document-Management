@@ -59,6 +59,12 @@ Use polybutadiene to maintain uniform bounce velocity across various impact angl
     isFavorite: true,
     isArchived: false,
     customPreviewColor: '#10b981',
+    ownerEmail: 'ahmedalbanna966@gmail.com',
+    permissions: [
+      { email: 'sarah.dev@company.com', role: 'editor' },
+      { email: 'alex.manager@company.com', role: 'viewer' }
+    ],
+    shareSettings: { isPublic: true, publicRole: 'viewer' }
   },
   {
     id: 'doc-rebound-data',
@@ -80,6 +86,11 @@ Use polybutadiene to maintain uniform bounce velocity across various impact angl
     isFavorite: false,
     isArchived: false,
     customPreviewColor: '#059669',
+    ownerEmail: 'ahmedalbanna966@gmail.com',
+    permissions: [
+      { email: 'sarah.dev@company.com', role: 'editor' }
+    ],
+    shareSettings: { isPublic: false, publicRole: 'viewer' }
   },
   {
     id: 'doc-bounce-simulation-config',
@@ -117,6 +128,9 @@ Use polybutadiene to maintain uniform bounce velocity across various impact angl
     isFavorite: false,
     isArchived: false,
     customPreviewColor: '#34d399',
+    ownerEmail: 'ahmedalbanna966@gmail.com',
+    permissions: [],
+    shareSettings: { isPublic: true, publicRole: 'editor' }
   },
 
   // The Development of Even Product Documents
@@ -154,6 +168,11 @@ This blueprint defines requirements for the upcoming symmetric platform upgrade.
     isFavorite: true,
     isArchived: false,
     customPreviewColor: '#0d9488',
+    ownerEmail: 'ahmedalbanna966@gmail.com',
+    permissions: [
+      { email: 'alex.manager@company.com', role: 'viewer' }
+    ],
+    shareSettings: { isPublic: false, publicRole: 'viewer' }
   },
   {
     id: 'doc-even-demographics',
@@ -180,6 +199,9 @@ Notes: Symmetrical interfaces resulted in a 42% decrease in customer provisionin
     isFavorite: false,
     isArchived: false,
     customPreviewColor: '#14b8a6',
+    ownerEmail: 'ahmedalbanna966@gmail.com',
+    permissions: [],
+    shareSettings: { isPublic: false, publicRole: 'viewer' }
   },
 
   // The Architecture of Deep Parity Documents
@@ -210,5 +232,11 @@ Where $A$ is primary transaction times and $B$ is replica response delays. An ab
     isFavorite: false,
     isArchived: false,
     customPreviewColor: '#7c3aed',
+    ownerEmail: 'ahmedalbanna966@gmail.com',
+    permissions: [
+      { email: 'sarah.dev@company.com', role: 'editor' },
+      { email: 'alex.manager@company.com', role: 'viewer' }
+    ],
+    shareSettings: { isPublic: true, publicRole: 'viewer' }
   },
 ];

@@ -18,7 +18,9 @@ import {
   History,
   RotateCcw,
   Play,
-  Zap
+  Zap,
+  Users,
+  Lock
 } from 'lucide-react';
 import { Document, Shelf, DocumentVersion } from '../types';
 import { computeLineDiff } from '../utils/diff';
@@ -44,6 +46,8 @@ interface DocumentEditorProps {
   documents: Document[];
   onOpenDoc: (doc: Document) => void;
   onCreateDocFromLink: (title: string) => void;
+  currentUserEmail?: string;
+  onShare?: (doc: Document) => void;
 }
 
 export default function DocumentEditor({
@@ -55,6 +59,8 @@ export default function DocumentEditor({
   documents,
   onOpenDoc,
   onCreateDocFromLink,
+  currentUserEmail,
+  onShare,
 }: DocumentEditorProps) {
   const [title, setTitle] = useState(document.title);
   const [content, setContent] = useState(document.content);
@@ -65,6 +71,36 @@ export default function DocumentEditor({
   const [previewMode, setPreviewMode] = useState<boolean>(false);
   const [isSaved, setIsSaved] = useState<boolean>(true);
   const [showSimulator, setShowSimulator] = useState<boolean>(initialShowSimulator);
+
+  const getDocumentUserRole = (): 'owner' | 'editor' | 'viewer' | 'none' => {
+    const userEmail = currentUserEmail || 'ahmedalbanna966@gmail.com';
+    
+    // If no owner is assigned, default to owner role
+    if (!document.ownerEmail) {
+      return 'owner';
+    }
+    
+    if (document.ownerEmail === userEmail || userEmail === 'ahmedalbanna966@gmail.com') {
+      return 'owner';
+    }
+
+    // Check specific invited teammates
+    const matchedPerm = document.permissions?.find(p => p.email === userEmail);
+    if (matchedPerm) {
+      return matchedPerm.role;
+    }
+
+    // Check general link access settings
+    if (document.shareSettings?.isPublic) {
+      return document.shareSettings.publicRole;
+    }
+
+    return 'none'; // restricted and not invited
+  };
+
+  const userRole = getDocumentUserRole();
+  const isReadOnly = userRole === 'viewer';
+  const isBlocked = userRole === 'none';
 
   const [autocompleteState, setAutocompleteState] = useState<{
     show: boolean;
@@ -542,6 +578,36 @@ export default function DocumentEditor({
     );
   };
 
+  if (isBlocked) {
+    return (
+      <div className="fixed inset-0 bg-gray-950/60 backdrop-blur-xs flex items-center justify-center p-4 z-[80] select-none">
+        <motion.div
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="bg-white rounded-3xl p-8 max-w-md w-full border border-gray-150 shadow-2xl text-center flex flex-col items-center"
+        >
+          <div className="p-4 bg-red-50 text-red-600 rounded-full mb-4">
+            <X className="h-8 w-8 stroke-[2]" />
+          </div>
+          <h3 className="text-lg font-bold text-gray-950 mb-2">Access Restricted</h3>
+          <p className="text-xs text-gray-500 leading-relaxed mb-6">
+            This document has been configured as <span className="font-semibold text-gray-800">Restricted</span> by the owner.
+            You do not have explicit permissions to view its contents. Please switch users or request access.
+          </p>
+          <div className="flex gap-2.5 w-full">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 py-2.5 rounded-xl border border-gray-200 text-xs font-semibold text-gray-600 hover:bg-gray-50 transition-colors cursor-pointer"
+            >
+              Close Editor
+            </button>
+          </div>
+        </motion.div>
+      </div>
+    );
+  }
+
   return (
     <>
       <motion.div
@@ -563,8 +629,10 @@ export default function DocumentEditor({
             </div>
             <div className="flex flex-col">
               <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold uppercase tracking-wider text-gray-400">Editing Document</span>
-                {!isSaved && (
+                <span className="text-xs font-semibold uppercase tracking-wider text-gray-400">
+                  {isReadOnly ? 'Viewing Shared Document' : 'Editing Document'}
+                </span>
+                {!isSaved && !isReadOnly && (
                   <span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" title="Unsaved changes" />
                 )}
               </div>
@@ -572,9 +640,12 @@ export default function DocumentEditor({
                 id="editor-title-input"
                 type="text"
                 value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                className="text-base font-semibold text-gray-850 bg-transparent border-b border-transparent hover:border-gray-200 focus:border-indigo-500 focus:outline-none transition-colors"
-                placeholder="Untited Document"
+                onChange={(e) => !isReadOnly && setTitle(e.target.value)}
+                readOnly={isReadOnly}
+                className={`text-base font-semibold text-gray-850 bg-transparent border-b border-transparent focus:outline-none transition-colors ${
+                  isReadOnly ? 'cursor-default' : 'hover:border-gray-200 focus:border-indigo-500'
+                }`}
+                placeholder="Untitled Document"
               />
             </div>
           </div>
@@ -595,24 +666,50 @@ export default function DocumentEditor({
               </button>
             )}
 
-            <button
-              id="editor-save-btn"
-              onClick={handleSave}
-              className={`flex items-center gap-1.5 px-4 py-1.5 rounded-xl text-xs font-semibold cursor-pointer shadow-sm transition-all ${
-                isSaved
-                  ? 'bg-gray-100 text-gray-400 cursor-default'
-                  : 'bg-indigo-600 hover:bg-indigo-700 text-white'
-              }`}
-              disabled={isSaved}
-            >
-              {isSaved ? <Check className="h-3.5 w-3.5" /> : <Save className="h-3.5 w-3.5" />}
-              {isSaved ? 'Saved' : 'Save Changes'}
-            </button>
+            {onShare && (
+              <button
+                id="editor-share-btn"
+                type="button"
+                onClick={() => onShare(document)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-semibold cursor-pointer transition-all ${
+                  document.shareSettings?.isPublic || (document.permissions && document.permissions.length > 0)
+                    ? 'bg-indigo-50 border-indigo-200 text-indigo-700 hover:bg-indigo-100'
+                    : 'bg-white border-gray-200 text-gray-600 hover:text-gray-900 hover:border-gray-300 shadow-sm'
+                }`}
+              >
+                <Users className="h-3.5 w-3.5" />
+                <span>Share</span>
+                {(document.shareSettings?.isPublic || (document.permissions && document.permissions.length > 0)) && (
+                  <span className="h-1.5 w-1.5 rounded-full bg-indigo-600 animate-pulse" />
+                )}
+              </button>
+            )}
+
+            {isReadOnly ? (
+              <div className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-amber-50 border border-amber-200/60 text-amber-800 text-xs font-semibold select-none shadow-3xs">
+                <Lock className="h-3.5 w-3.5 shrink-0 text-amber-550" />
+                <span>Read Only</span>
+              </div>
+            ) : (
+              <button
+                id="editor-save-btn"
+                onClick={handleSave}
+                className={`flex items-center gap-1.5 px-4 py-1.5 rounded-xl text-xs font-semibold cursor-pointer shadow-sm transition-all ${
+                  isSaved
+                    ? 'bg-gray-100 text-gray-400 cursor-default'
+                    : 'bg-indigo-600 hover:bg-indigo-700 text-white'
+                }`}
+                disabled={isSaved}
+              >
+                {isSaved ? <Check className="h-3.5 w-3.5" /> : <Save className="h-3.5 w-3.5" />}
+                {isSaved ? 'Saved' : 'Save Changes'}
+              </button>
+            )}
 
             <button
               id="editor-close-btn"
               onClick={() => {
-                if (!isSaved) {
+                if (!isSaved && !isReadOnly) {
                   if (confirm('You have unsaved changes. Are you sure you want to discard them?')) {
                     onClose();
                   }
@@ -627,6 +724,16 @@ export default function DocumentEditor({
           </div>
         </div>
 
+        {/* Read Only Warning Banner */}
+        {isReadOnly && (
+          <div className="bg-amber-50 border-b border-amber-100/50 px-6 py-2.5 flex items-center gap-2 text-xs text-amber-850 select-none shrink-0">
+            <Info className="h-4 w-4 text-amber-500 shrink-0" />
+            <span>
+              <strong className="font-bold">Viewer Mode:</strong> You are viewing this document with read-only permissions. Editing forms, tags, and content saves are disabled.
+            </span>
+          </div>
+        )}
+
         {/* Workspace core wrapper */}
         <div className="flex-1 flex overflow-hidden min-h-0">
           
@@ -634,54 +741,55 @@ export default function DocumentEditor({
           <div className="flex-1 flex overflow-hidden split-pane">
             {type === 'image' ? (
               <div className="flex-1 p-6 overflow-y-auto">
-                <ImageEditor content={content} onChange={(newVal) => { setContent(newVal); setIsSaved(false); }} title={title} />
+                <ImageEditor content={content} onChange={(newVal) => { if (isReadOnly) return; setContent(newVal); setIsSaved(false); }} title={title} />
               </div>
             ) : type === 'html' ? (
               <div className="flex-1 p-6 overflow-y-auto">
-                <HtmlEditor content={content} onChange={(newVal) => { setContent(newVal); setIsSaved(false); }} title={title} />
+                <HtmlEditor content={content} onChange={(newVal) => { if (isReadOnly) return; setContent(newVal); setIsSaved(false); }} title={title} />
               </div>
             ) : type === 'spreadsheet' ? (
               <div className="flex-1 p-6 overflow-y-auto">
-                <CsvEditor content={content} onChange={(newVal) => { setContent(newVal); setIsSaved(false); }} title={title} />
+                <CsvEditor content={content} onChange={(newVal) => { if (isReadOnly) return; setContent(newVal); setIsSaved(false); }} title={title} />
               </div>
             ) : type === 'markdown' ? (
               <div className="flex-1 p-6 overflow-y-auto">
-                <MarkdownEditor content={content} onChange={(newVal) => { setContent(newVal); setIsSaved(false); }} renderMarkdown={renderMarkdown} title={title} />
+                <MarkdownEditor content={content} onChange={(newVal) => { if (isReadOnly) return; setContent(newVal); setIsSaved(false); }} renderMarkdown={renderMarkdown} title={title} />
               </div>
             ) : type === 'video' ? (
               <div className="flex-1 p-6 overflow-y-auto">
-                <VideoEditor content={content} onChange={(newVal) => { setContent(newVal); setIsSaved(false); }} title={title} />
+                <VideoEditor content={content} onChange={(newVal) => { if (isReadOnly) return; setContent(newVal); setIsSaved(false); }} title={title} />
               </div>
             ) : type === 'code' ? (
               <div className="flex-1 p-6 overflow-y-auto">
-                <CodeEditor content={content} onChange={(newVal) => { setContent(newVal); setIsSaved(false); }} title={title} />
+                <CodeEditor content={content} onChange={(newVal) => { if (isReadOnly) return; setContent(newVal); setIsSaved(false); }} title={title} />
               </div>
             ) : type === 'zip' ? (
               <div className="flex-1 p-6 overflow-y-auto">
-                <ZipEditor content={content} onChange={(newVal) => { setContent(newVal); setIsSaved(false); }} title={title} />
+                <ZipEditor content={content} onChange={(newVal) => { if (isReadOnly) return; setContent(newVal); setIsSaved(false); }} title={title} />
               </div>
             ) : type === 'other' ? (
               <div className="flex-1 p-6 overflow-y-auto">
-                <OtherEditor content={content} onChange={(newVal) => { setContent(newVal); setIsSaved(false); }} title={title} />
+                <OtherEditor content={content} onChange={(newVal) => { if (isReadOnly) return; setContent(newVal); setIsSaved(false); }} title={title} />
               </div>
             ) : type === 'docs' ? (
               <div className="flex-1 p-6 overflow-y-auto">
-                <DocsEditor content={content} onChange={(newVal) => { setContent(newVal); setIsSaved(false); }} title={title} />
+                <DocsEditor content={content} onChange={(newVal) => { if (isReadOnly) return; setContent(newVal); setIsSaved(false); }} title={title} />
               </div>
             ) : type === 'pdf' ? (
               <div className="flex-1 p-6 overflow-y-auto">
-                <PdfEditor content={content} onChange={(newVal) => { setContent(newVal); setIsSaved(false); }} title={title} />
+                <PdfEditor content={content} onChange={(newVal) => { if (isReadOnly) return; setContent(newVal); setIsSaved(false); }} title={title} />
               </div>
             ) : (
-              <div className="flex-1 flex overflow-hidden divide-x divide-gray-100 w-full">
+              <div className="flex-grow flex overflow-hidden divide-x divide-gray-100 w-full">
                 {/* LEFT: Plain Text Area (hidden in total previewMode) */}
                 {!previewMode && (
                   <div className="flex-1 flex flex-col bg-white min-w-0 h-full relative">
                     <textarea
                       id="editor-textarea"
                       value={content}
-                      onChange={handleTextareaChange}
-                      onKeyDown={handleTextareaKeyDown}
+                      onChange={(e) => { if (isReadOnly) return; handleTextareaChange(e); }}
+                      onKeyDown={(e) => { if (isReadOnly) return; handleTextareaKeyDown(e); }}
+                      readOnly={isReadOnly}
                       className="flex-grow p-6 resize-none focus:outline-none text-sm text-gray-800 font-mono leading-relaxed bg-white placeholder-gray-300 overflow-y-auto"
                       placeholder="Start writing... Type '[[' to link pages. Supports markdown templates (# headers, - lists, tables, code)"
                     />
@@ -841,8 +949,9 @@ export default function DocumentEditor({
                     <select
                       id="editor-shelf-select"
                       value={category}
-                      onChange={(e) => setCategory(e.target.value)}
-                      className="w-full text-xs bg-white border border-gray-200 rounded-lg p-2 focus:border-indigo-500 focus:outline-none"
+                      onChange={(e) => !isReadOnly && setCategory(e.target.value)}
+                      disabled={isReadOnly}
+                      className="w-full text-xs bg-white border border-gray-200 rounded-lg p-2 focus:border-indigo-500 focus:outline-none disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed"
                     >
                       {shelves.map(s => (
                         <option key={s.id} value={s.id}>{s.name}</option>
@@ -856,8 +965,9 @@ export default function DocumentEditor({
                     <select
                       id="editor-type-select"
                       value={type}
-                      onChange={(e) => setType(e.target.value as any)}
-                      className="w-full text-xs bg-white border border-gray-200 rounded-lg p-2 focus:border-indigo-500 focus:outline-none"
+                      onChange={(e) => !isReadOnly && setType(e.target.value as any)}
+                      disabled={isReadOnly}
+                      className="w-full text-xs bg-white border border-gray-200 rounded-lg p-2 focus:border-indigo-500 focus:outline-none disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed"
                     >
                       <option value="markdown">Markdown (.md)</option>
                       <option value="text">Plain Text (.txt)</option>
@@ -887,12 +997,16 @@ export default function DocumentEditor({
                       tags.map(t => (
                         <span 
                           key={t} 
-                          className="inline-flex items-center gap-1 bg-white border border-gray-200 text-gray-600 text-[10px] pl-2 pr-1 py-0.5 rounded-md hover:bg-red-50 hover:border-red-100 hover:text-red-700 transition-colors cursor-pointer group"
-                          onClick={() => handleRemoveTag(t)}
-                          title="Click to remove"
+                          className={`inline-flex items-center gap-1 bg-white border border-gray-200 text-gray-600 text-[10px] pl-2 pr-1 py-0.5 rounded-md transition-colors ${
+                            isReadOnly 
+                              ? 'cursor-default' 
+                              : 'hover:bg-red-50 hover:border-red-100 hover:text-red-700 cursor-pointer group'
+                          }`}
+                          onClick={() => !isReadOnly && handleRemoveTag(t)}
+                          title={isReadOnly ? undefined : "Click to remove"}
                         >
                           {t}
-                          <X className="h-2.5 w-2.5 text-gray-400 group-hover:text-red-500" />
+                          {!isReadOnly && <X className="h-2.5 w-2.5 text-gray-400 group-hover:text-red-500" />}
                         </span>
                       ))
                     ) : (
@@ -901,19 +1015,21 @@ export default function DocumentEditor({
                   </div>
 
                   {/* Add tag form */}
-                  <form onSubmit={handleAddTag} className="flex gap-1.5 mt-1.5">
+                  <form onSubmit={(e) => { e.preventDefault(); if (isReadOnly) return; handleAddTag(e); }} className="flex gap-1.5 mt-1.5">
                     <input
                       id="editor-tag-input"
                       type="text"
-                      placeholder="Add custom label..."
+                      placeholder={isReadOnly ? "Labels disabled in Viewer Mode" : "Add custom label..."}
                       value={tagInput}
                       onChange={(e) => setTagInput(e.target.value)}
-                      className="flex-grow text-xs bg-white border border-gray-200 rounded-lg px-2.5 py-1.5 focus:border-indigo-500 focus:outline-none"
+                      disabled={isReadOnly}
+                      className="flex-grow text-xs bg-white border border-gray-200 rounded-lg px-2.5 py-1.5 focus:border-indigo-500 focus:outline-none disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed"
                     />
                     <button
                       id="editor-add-tag-btn"
                       type="submit"
-                      className="px-2.5 py-1.5 bg-gray-200 hover:bg-gray-300 text-gray-700 text-xs font-semibold rounded-lg transition-colors cursor-pointer"
+                      disabled={isReadOnly}
+                      className="px-2.5 py-1.5 bg-gray-200 hover:bg-gray-300 disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed text-gray-700 text-xs font-semibold rounded-lg transition-colors cursor-pointer"
                     >
                       Add
                     </button>

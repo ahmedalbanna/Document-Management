@@ -1,5 +1,15 @@
 export type DocumentType = 'markdown' | 'text' | 'json' | 'pdf' | 'spreadsheet' | 'image' | 'html' | 'video' | 'code' | 'zip' | 'other' | 'docs';
 
+export interface FilePermission {
+  email: string;
+  role: 'viewer' | 'editor';
+}
+
+export interface ShareSettings {
+  isPublic: boolean; // false = restricted, true = public
+  publicRole: 'viewer' | 'editor'; // role for users with general link access
+}
+
 export interface DocumentVersion {
   id: string;
   versionNumber: number;
@@ -27,6 +37,9 @@ export interface Document {
   isArchived: boolean;
   customPreviewColor?: string;
   versions?: DocumentVersion[];
+  ownerEmail?: string;
+  permissions?: FilePermission[];
+  shareSettings?: ShareSettings;
 }
 
 export interface Shelf {
@@ -41,7 +54,7 @@ export interface ActivityLog {
   id: string;
   documentId: string;
   documentTitle: string;
-  action: 'create' | 'edit' | 'delete' | 'archive' | 'restore' | 'favorite' | 'download' | 'upload';
+  action: 'create' | 'edit' | 'delete' | 'archive' | 'restore' | 'favorite' | 'download' | 'upload' | 'share';
   timestamp: string;
 }
 

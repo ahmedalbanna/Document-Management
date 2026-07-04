@@ -19,7 +19,10 @@ import {
   Video,
   Code,
   Archive,
-  Binary
+  Binary,
+  Users,
+  Lock,
+  Eye
 } from 'lucide-react';
 import { Document, Shelf } from '../types';
 
@@ -35,6 +38,8 @@ interface DocumentCardProps {
   onRun?: (doc: Document) => void;
   selectedDocIds?: string[];
   onToggleSelectDoc?: (docId: string, isShift: boolean) => void;
+  onShare?: (doc: Document) => void;
+  currentUserEmail?: string;
 }
 
 export default function DocumentCard({
@@ -48,11 +53,40 @@ export default function DocumentCard({
   onRun,
   selectedDocIds,
   onToggleSelectDoc,
+  onShare,
+  currentUserEmail,
 }: DocumentCardProps) {
   const [isHovered, setIsHovered] = useState(false);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [tempTitle, setTempTitle] = useState(document.title);
   const [showMoveDropdown, setShowMoveDropdown] = useState(false);
+
+  const getDocumentUserRole = (): 'owner' | 'editor' | 'viewer' | 'none' => {
+    const userEmail = currentUserEmail || 'ahmedalbanna966@gmail.com';
+    
+    if (!document.ownerEmail) {
+      return 'owner';
+    }
+    
+    if (document.ownerEmail === userEmail || userEmail === 'ahmedalbanna966@gmail.com') {
+      return 'owner';
+    }
+
+    const matchedPerm = document.permissions?.find(p => p.email === userEmail);
+    if (matchedPerm) {
+      return matchedPerm.role;
+    }
+
+    if (document.shareSettings?.isPublic) {
+      return document.shareSettings.publicRole;
+    }
+
+    return 'none';
+  };
+
+  const userRole = getDocumentUserRole();
+  const isReadOnly = userRole === 'viewer';
+  const isBlocked = userRole === 'none';
 
   const getDocIcon = () => {
     switch (document.type) {
@@ -349,6 +383,16 @@ export default function DocumentCard({
             <span className={`text-[10px] uppercase tracking-wider font-semibold border px-1.5 py-0.5 rounded-md ${getBadgeColor()}`}>
               {document.type}
             </span>
+            {isBlocked && (
+              <span className="text-[10px] uppercase tracking-wider font-semibold border px-1.5 py-0.5 rounded-md bg-red-50 text-red-650 border-red-150 flex items-center gap-0.5" title="You have no permission to view/edit this document">
+                <Lock className="h-2.5 w-2.5" /> Blocked
+              </span>
+            )}
+            {isReadOnly && !isBlocked && (
+              <span className="text-[10px] uppercase tracking-wider font-semibold border px-1.5 py-0.5 rounded-md bg-amber-50 text-amber-750 border-amber-150 flex items-center gap-0.5" title="You have read-only access to this document">
+                <Eye className="h-2.5 w-2.5" /> Read-Only
+              </span>
+            )}
             {currentShelf && (
               <span className="text-[10px] text-gray-400 flex items-center gap-1 font-mono">
                 <Layers className="h-3 w-3 inline text-gray-300" />
@@ -459,6 +503,27 @@ export default function DocumentCard({
             >
               <Download className="h-4 w-4" />
             </button>
+
+            {onShare && (
+              <button
+                id={`share-btn-${document.id}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onShare(document);
+                }}
+                className={`p-1.5 rounded-lg transition-colors relative ${
+                  document.shareSettings?.isPublic || (document.permissions && document.permissions.length > 0)
+                    ? 'text-indigo-600 bg-indigo-50 hover:bg-indigo-100'
+                    : 'text-gray-400 hover:text-indigo-600 hover:bg-indigo-50/80'
+                }`}
+                title="Share & Permissions Settings"
+              >
+                <Users className="h-4 w-4" />
+                {(document.shareSettings?.isPublic || (document.permissions && document.permissions.length > 0)) && (
+                  <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-indigo-600 animate-pulse" />
+                )}
+              </button>
+            )}
 
             <button
               id={`delete-btn-${document.id}`}
