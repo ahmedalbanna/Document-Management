@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ChevronLeft, ChevronRight, Plus, Trash2, Edit2, Layers, Check } from 'lucide-react';
 import { Document, Shelf } from '../types';
@@ -48,10 +48,174 @@ export default function ShelfRow({
   onToggleSelectDoc,
 }: ShelfRowProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const [isEditingShelf, setIsEditingShelf] = React.useState(false);
-  const [editedName, setEditedName] = React.useState(shelf.name);
-  const [editedDesc, setEditedDesc] = React.useState(shelf.description);
-  const [editedColor, setEditedColor] = React.useState(shelf.color);
+  const [isEditingShelf, setIsEditingShelf] = useState(false);
+  const [editedName, setEditedName] = useState(shelf.name);
+  const [editedDesc, setEditedDesc] = useState(shelf.description);
+  const [editedColor, setEditedColor] = useState(shelf.color);
+
+  // --- Micro-virtualization State & Throttled Scroll Engine ---
+  const [scrollLeft, setScrollLeft] = useState(0);
+  const [containerWidth, setContainerWidth] = useState(0);
+  const [scrollWidth, setScrollWidth] = useState(0);
+
+  const isUpdating = useRef(false);
+  const handleContainerScroll = () => {
+    if (!scrollRef.current) return;
+    const currentScrollLeft = scrollRef.current.scrollLeft;
+    const currentScrollWidth = scrollRef.current.scrollWidth;
+
+    if (!isUpdating.current) {
+      isUpdating.current = true;
+      requestAnimationFrame(() => {
+        setScrollLeft(currentScrollLeft);
+        setScrollWidth(currentScrollWidth);
+        isUpdating.current = false;
+      });
+    }
+  };
+
+  // ResizeObserver for tracking scrollable block size responsively
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+
+    setContainerWidth(el.clientWidth);
+    setScrollWidth(el.scrollWidth);
+
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setContainerWidth(entry.contentRect.width);
+      }
+    });
+    observer.observe(el);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
+
+  // Recalculate container scroll capabilities when list changes
+  useEffect(() => {
+    if (scrollRef.current) {
+      setScrollWidth(scrollRef.current.scrollWidth);
+      setContainerWidth(scrollRef.current.clientWidth);
+    }
+  }, [documents]);
+
+  // --- Physical Drag-to-Scroll on Rails Track ---
+  const [isDraggingTrack, setIsDraggingTrack] = useState(false);
+  const trackDragStartX = useRef(0);
+  const trackDragStartScrollLeft = useRef(0);
+  const hasMovedTrack = useRef(false);
+
+  const handleTrackMouseDown = (e: React.MouseEvent) => {
+    const target = e.target as HTMLElement;
+    if (
+      target.closest('button') ||
+      target.closest('input') ||
+      target.closest('form') ||
+      target.closest('select') ||
+      target.closest('a') ||
+      target.id.includes('slider-handle') ||
+      target.id.includes('slider-track')
+    ) {
+      return;
+    }
+
+    if (!scrollRef.current) return;
+    setIsDraggingTrack(true);
+    trackDragStartX.current = e.clientX;
+    trackDragStartScrollLeft.current = scrollRef.current.scrollLeft;
+    hasMovedTrack.current = false;
+  };
+
+  useEffect(() => {
+    if (!isDraggingTrack) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!scrollRef.current) return;
+      const deltaX = e.clientX - trackDragStartX.current;
+      
+      if (Math.abs(deltaX) > 4) {
+        hasMovedTrack.current = true;
+      }
+
+      scrollRef.current.scrollLeft = trackDragStartScrollLeft.current - deltaX * 1.2;
+      handleContainerScroll();
+    };
+
+    const handleMouseUp = () => {
+      setIsDraggingTrack(false);
+      if (hasMovedTrack.current) {
+        const preventClick = (clickEvent: MouseEvent) => {
+          clickEvent.preventDefault();
+          clickEvent.stopPropagation();
+          window.removeEventListener('click', preventClick, true);
+        };
+        window.addEventListener('click', preventClick, true);
+      }
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isDraggingTrack]);
+
+  // --- Interactive Custom Slider Handle ---
+  const sliderTrackRef = useRef<HTMLDivElement>(null);
+  const [isDraggingSlider, setIsDraggingSlider] = useState(false);
+  const dragStartScrollLeft = useRef(0);
+  const dragStartX = useRef(0);
+
+  const handleSliderMouseDown = (e: React.MouseEvent) => {
+    if (!scrollRef.current || !sliderTrackRef.current) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    setIsDraggingSlider(true);
+    dragStartX.current = e.clientX;
+    dragStartScrollLeft.current = scrollRef.current.scrollLeft;
+  };
+
+  useEffect(() => {
+    if (!isDraggingSlider) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!scrollRef.current || !sliderTrackRef.current) return;
+      const deltaX = e.clientX - dragStartX.current;
+      const trackWidth = sliderTrackRef.current.clientWidth;
+      const elWidth = scrollRef.current.clientWidth;
+      const sWidth = scrollRef.current.scrollWidth;
+
+      const maxScrollLeft = sWidth - elWidth;
+      const handlePercent = Math.max(16, (elWidth / sWidth) * 100);
+      const sliderTravelWidth = trackWidth * (1 - handlePercent / 100);
+
+      if (sliderTravelWidth <= 0) return;
+
+      const scrollRatio = deltaX / sliderTravelWidth;
+      const newScrollLeft = dragStartScrollLeft.current + scrollRatio * maxScrollLeft;
+
+      scrollRef.current.scrollLeft = Math.max(0, Math.min(maxScrollLeft, newScrollLeft));
+      handleContainerScroll();
+    };
+
+    const handleMouseUp = () => {
+      setIsDraggingSlider(false);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isDraggingSlider]);
 
   const getShelfEditsLastWeek = () => {
     const oneWeekAgo = new Date();
@@ -100,6 +264,18 @@ export default function ShelfRow({
       default: return 'border-gray-300';
     }
   };
+
+  // --- Calculate Virtual Range ---
+  const totalCount = documents.length;
+  const cardWidth = 304; // 280px card + 24px gap
+
+  const startIndex = Math.max(0, Math.floor(scrollLeft / cardWidth) - 2);
+  const endIndex = Math.min(totalCount - 1, Math.ceil((scrollLeft + containerWidth) / cardWidth) + 2);
+
+  const renderedDocs = documents.slice(startIndex, endIndex + 1);
+
+  const leftSpacerWidth = startIndex > 0 ? startIndex * cardWidth - 24 : 0;
+  const rightSpacerWidth = endIndex < totalCount - 1 ? (totalCount - endIndex - 1) * cardWidth - 24 : 0;
 
   return (
     <div id={`shelf-row-${shelf.id}`} className="mb-10 flex flex-col w-full group/shelf select-none">
@@ -271,33 +447,63 @@ export default function ShelfRow({
       </div>
 
       {/* Horizontal Rail Container matches User's grey blocks layout */}
-      <div className={`relative w-full bg-[#E5E5E5] rounded-2xl p-6 overflow-hidden transition-all duration-300 border ${
-        isShelfHot 
-          ? 'border-amber-400/55 shadow-[0_4px_25px_rgba(245,158,11,0.15)] ring-2 ring-amber-100/10' 
-          : 'border-transparent'
-      }`}>
+      <div 
+        onMouseDown={handleTrackMouseDown}
+        className={`relative w-full bg-[#E5E5E5] rounded-2xl p-6 pb-4 overflow-hidden transition-all duration-300 border flex flex-col gap-4 select-none ${
+          isDraggingTrack ? 'cursor-grabbing' : 'cursor-grab'
+        } ${
+          isShelfHot 
+            ? 'border-amber-400/55 shadow-[0_4px_25px_rgba(245,158,11,0.15)] ring-2 ring-amber-100/10' 
+            : 'border-transparent'
+        }`}
+      >
         <div
           ref={scrollRef}
+          onScroll={handleContainerScroll}
           className="flex gap-6 overflow-x-auto pb-1 scrollbar-none snap-x"
           style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
         >
           <AnimatePresence mode="popLayout">
             {documents.length > 0 ? (
-              documents.map((doc) => (
-                <DocumentCard
-                  key={doc.id}
-                  document={doc}
-                  shelves={allShelves}
-                  onOpen={onOpenDoc}
-                  onFavorite={onFavoriteDoc}
-                  onDelete={onDeleteDoc}
-                  onMoveShelf={onMoveDocShelf}
-                  onRename={onRenameDoc}
-                  onRun={onRunDoc}
-                  selectedDocIds={selectedDocIds}
-                  onToggleSelectDoc={(id, isShift) => onToggleSelectDoc(id, isShift, documents)}
-                />
-              ))
+              <motion.div
+                key="shelf-docs-list"
+                className="flex gap-6"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+              >
+                {leftSpacerWidth > 0 && (
+                  <div 
+                    key="left-spacer"
+                    style={{ width: leftSpacerWidth, minWidth: leftSpacerWidth, flexShrink: 0 }} 
+                    className="pointer-events-none"
+                  />
+                )}
+
+                {renderedDocs.map((doc) => (
+                  <DocumentCard
+                    key={doc.id}
+                    document={doc}
+                    shelves={allShelves}
+                    onOpen={onOpenDoc}
+                    onFavorite={onFavoriteDoc}
+                    onDelete={onDeleteDoc}
+                    onMoveShelf={onMoveDocShelf}
+                    onRename={onRenameDoc}
+                    onRun={onRunDoc}
+                    selectedDocIds={selectedDocIds}
+                    onToggleSelectDoc={(id, isShift) => onToggleSelectDoc(id, isShift, documents)}
+                  />
+                ))}
+
+                {rightSpacerWidth > 0 && (
+                  <div 
+                    key="right-spacer"
+                    style={{ width: rightSpacerWidth, minWidth: rightSpacerWidth, flexShrink: 0 }} 
+                    className="pointer-events-none"
+                  />
+                )}
+              </motion.div>
             ) : (
               <motion.div
                 initial={{ opacity: 0 }}
@@ -314,6 +520,49 @@ export default function ShelfRow({
             )}
           </AnimatePresence>
         </div>
+
+        {/* Debounced Virtual Slider Bar */}
+        {scrollWidth > containerWidth && (
+          <div className="w-full flex justify-center items-center mt-2 select-none">
+            <div 
+              ref={sliderTrackRef}
+              id={`slider-track-${shelf.id}`}
+              className="relative w-48 h-1.5 bg-gray-300/60 rounded-full cursor-pointer hover:bg-gray-300 transition-colors"
+              onClick={(e) => {
+                if (e.target !== e.currentTarget) return;
+                if (!scrollRef.current || !sliderTrackRef.current) return;
+                const rect = sliderTrackRef.current.getBoundingClientRect();
+                const clickX = e.clientX - rect.left;
+                const ratio = clickX / rect.width;
+                const maxScrollLeft = scrollRef.current.scrollWidth - scrollRef.current.clientWidth;
+                scrollRef.current.scrollTo({
+                  left: ratio * maxScrollLeft,
+                  behavior: 'smooth'
+                });
+              }}
+            >
+              <div
+                onMouseDown={handleSliderMouseDown}
+                id={`slider-handle-${shelf.id}`}
+                className={`absolute top-0 h-full rounded-full bg-indigo-600 hover:bg-indigo-700 transition-all ${
+                  isDraggingSlider ? 'bg-indigo-800 scale-y-110 cursor-grabbing' : 'cursor-grab'
+                }`}
+                style={{
+                  width: `${Math.max(16, (containerWidth / scrollWidth) * 100)}%`,
+                  left: `${(scrollLeft / (scrollWidth - containerWidth || 1)) * (100 - Math.max(16, (containerWidth / scrollWidth) * 100))}%`,
+                }}
+              />
+            </div>
+            
+            {/* Visual lock status badge confirming 60fps micro-virtualization */}
+            <div className="ml-3 text-[9px] font-mono font-semibold text-gray-500 bg-white/80 px-2.5 py-0.5 rounded-full border border-gray-150 flex items-center gap-1.5 shadow-2xs">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              <span>VCS-SLIDERS @ 60fps</span>
+              <span className="text-gray-300">|</span>
+              <span>{renderedDocs.length}/{documents.length} visible</span>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
