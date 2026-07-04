@@ -53,6 +53,24 @@ export default function ShelfRow({
   const [editedDesc, setEditedDesc] = React.useState(shelf.description);
   const [editedColor, setEditedColor] = React.useState(shelf.color);
 
+  const getShelfEditsLastWeek = () => {
+    const oneWeekAgo = new Date();
+    oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+    
+    return documents.reduce((sum, doc) => {
+      let count = 0;
+      if (doc.versions && doc.versions.length > 0) {
+        count = doc.versions.filter(v => new Date(v.updatedAt) >= oneWeekAgo).length;
+      } else if (new Date(doc.updatedAt || doc.createdAt) >= oneWeekAgo) {
+        count = 1;
+      }
+      return sum + count;
+    }, 0);
+  };
+
+  const shelfEditsCount = getShelfEditsLastWeek();
+  const isShelfHot = shelfEditsCount >= 5;
+
   const handleScroll = (direction: 'left' | 'right') => {
     if (scrollRef.current) {
       const scrollAmount = 400;
@@ -166,11 +184,23 @@ export default function ShelfRow({
                 shelf.color === 'amber' ? 'bg-amber-500' :
                 shelf.color === 'rose' ? 'bg-rose-500' : 'bg-sky-500'
               }`} />
-              <h2 className="text-base font-semibold text-gray-800 tracking-tight flex items-center gap-2">
+              <h2 className="text-base font-semibold text-gray-800 tracking-tight flex items-center gap-2 flex-wrap">
                 {shelf.name}
                 <span className="text-xs bg-gray-100 text-gray-500 rounded-full px-2 py-0.5 font-mono">
                   {documents.length}
                 </span>
+                {shelfEditsCount > 0 && (
+                  <span 
+                    className={`text-[10px] font-bold px-2 py-0.5 rounded-full border flex items-center gap-0.5 ${
+                      isShelfHot 
+                        ? 'bg-amber-50 text-amber-700 border-amber-200 animate-pulse shadow-xs' 
+                        : 'bg-indigo-50 text-indigo-700 border-indigo-150'
+                    }`}
+                    title={`${shelfEditsCount} edits across this shelf's documents this week`}
+                  >
+                    {isShelfHot ? '🔥' : '⚡'} {shelfEditsCount} {shelfEditsCount === 1 ? 'edit' : 'edits'}/wk
+                  </span>
+                )}
               </h2>
               {/* Shelf controls */}
               <div className="hidden group-hover/shelf:flex items-center gap-1.5 transition-all">
@@ -241,7 +271,11 @@ export default function ShelfRow({
       </div>
 
       {/* Horizontal Rail Container matches User's grey blocks layout */}
-      <div className="relative w-full bg-[#E5E5E5] rounded-2xl p-6 overflow-hidden">
+      <div className={`relative w-full bg-[#E5E5E5] rounded-2xl p-6 overflow-hidden transition-all duration-300 border ${
+        isShelfHot 
+          ? 'border-amber-400/55 shadow-[0_4px_25px_rgba(245,158,11,0.15)] ring-2 ring-amber-100/10' 
+          : 'border-transparent'
+      }`}>
         <div
           ref={scrollRef}
           className="flex gap-6 overflow-x-auto pb-1 scrollbar-none snap-x"

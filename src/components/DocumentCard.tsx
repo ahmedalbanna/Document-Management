@@ -128,6 +128,22 @@ export default function DocumentCard({
   const currentShelf = shelves.find(s => s.id === document.category);
   const isRunnable = document.category === 'shelf-repetitive-bounce' || document.category === 'shelf-deep-parity' || document.category === 'shelf-even-product';
 
+  const getRevisionsLastWeek = () => {
+    const oneWeekAgo = new Date();
+    oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+    
+    let count = 0;
+    if (document.versions && document.versions.length > 0) {
+      count = document.versions.filter(v => new Date(v.updatedAt) >= oneWeekAgo).length;
+    } else if (new Date(document.updatedAt || document.createdAt) >= oneWeekAgo) {
+      count = 1;
+    }
+    return count;
+  };
+
+  const recentEditsCount = getRevisionsLastWeek();
+  const isDocHot = recentEditsCount >= 3;
+
   return (
     <motion.div
       id={`document-card-${document.id}`}
@@ -146,7 +162,9 @@ export default function DocumentCard({
       className={`relative flex flex-col min-w-[280px] w-[280px] h-[370px] bg-white rounded-2xl border transition-all overflow-hidden group select-none cursor-pointer ${
         isSelected 
           ? 'border-indigo-500 ring-4 ring-indigo-100/50 shadow-md' 
-          : 'border-gray-150 shadow-sm hover:shadow-md'
+          : isDocHot
+            ? 'border-amber-400 shadow-[0_0_12px_rgba(245,158,11,0.2)] ring-2 ring-amber-100/30'
+            : 'border-gray-150 shadow-sm hover:shadow-md'
       }`}
     >
       {/* Dynamic Content Micro-Preview (Visual top card) */}
@@ -310,6 +328,18 @@ export default function DocumentCard({
               <span className="text-[10px] text-gray-400 flex items-center gap-1 font-mono">
                 <Layers className="h-3 w-3 inline text-gray-300" />
                 {currentShelf.name.split(' ').slice(0, 3).join(' ')}...
+              </span>
+            )}
+            {recentEditsCount > 0 && (
+              <span 
+                className={`text-[10px] font-semibold border px-1.5 py-0.5 rounded-md flex items-center gap-0.5 ${
+                  isDocHot 
+                    ? 'bg-amber-50 text-amber-700 border-amber-200 animate-pulse' 
+                    : 'bg-indigo-50 text-indigo-750 border-indigo-150'
+                }`}
+                title={`${recentEditsCount} edits in the last 7 days`}
+              >
+                {isDocHot ? '🔥' : '⚡'} {recentEditsCount} {recentEditsCount === 1 ? 'edit' : 'edits'}/wk
               </span>
             )}
           </div>
