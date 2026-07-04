@@ -10,6 +10,7 @@ export interface DocumentVersion {
   updatedAt: string;
   changeSummary: string;
   size: number;
+  parentId?: string | null;
 }
 
 export interface Document {

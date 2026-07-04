@@ -14,7 +14,8 @@ import {
   Calendar,
   Layers,
   ArrowRight,
-  Play
+  Play,
+  Check
 } from 'lucide-react';
 import { Document, Shelf } from '../types';
 
@@ -28,6 +29,8 @@ interface DocumentCardProps {
   onMoveShelf: (docId: string, newShelfId: string) => void;
   onRename: (docId: string, newTitle: string) => void;
   onRun?: (doc: Document) => void;
+  selectedDocIds?: string[];
+  onToggleSelectDoc?: (docId: string, isShift: boolean) => void;
 }
 
 export default function DocumentCard({
@@ -39,6 +42,8 @@ export default function DocumentCard({
   onMoveShelf,
   onRename,
   onRun,
+  selectedDocIds,
+  onToggleSelectDoc,
 }: DocumentCardProps) {
   const [isHovered, setIsHovered] = useState(false);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -98,6 +103,28 @@ export default function DocumentCard({
     return lines.slice(0, 5);
   };
 
+  const isSelected = selectedDocIds?.includes(document.id) || false;
+
+  const handleCardClick = (e: React.MouseEvent) => {
+    const target = e.target as HTMLElement;
+    if (
+      target.closest('button') || 
+      target.closest('input') || 
+      target.closest('form') || 
+      target.closest('select') ||
+      target.id.includes('move-dropdown')
+    ) {
+      return;
+    }
+
+    if (e.shiftKey && onToggleSelectDoc) {
+      e.preventDefault();
+      onToggleSelectDoc(document.id, true);
+    } else {
+      onOpen(document);
+    }
+  };
+
   const currentShelf = shelves.find(s => s.id === document.category);
   const isRunnable = document.category === 'shelf-repetitive-bounce' || document.category === 'shelf-deep-parity' || document.category === 'shelf-even-product';
 
@@ -115,13 +142,36 @@ export default function DocumentCard({
         setIsHovered(false);
         setShowMoveDropdown(false);
       }}
-      className="relative flex flex-col min-w-[280px] w-[280px] h-[370px] bg-white rounded-2xl border border-gray-100 shadow-sm hover:shadow-md transition-shadow overflow-hidden group select-none"
+      onClick={handleCardClick}
+      className={`relative flex flex-col min-w-[280px] w-[280px] h-[370px] bg-white rounded-2xl border transition-all overflow-hidden group select-none cursor-pointer ${
+        isSelected 
+          ? 'border-indigo-500 ring-4 ring-indigo-100/50 shadow-md' 
+          : 'border-gray-150 shadow-sm hover:shadow-md'
+      }`}
     >
       {/* Dynamic Content Micro-Preview (Visual top card) */}
       <div 
-        onClick={() => onOpen(document)}
-        className="relative h-[160px] bg-gray-50/80 p-4 border-b border-gray-100 cursor-pointer overflow-hidden transition-colors group-hover:bg-gray-50/40"
+        className="relative h-[160px] bg-gray-50/80 p-4 border-b border-gray-100 overflow-hidden transition-colors group-hover:bg-gray-50/40"
       >
+        {/* Selection Checkbox */}
+        {onToggleSelectDoc && (
+          <button
+            type="button"
+            id={`select-checkbox-${document.id}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleSelectDoc(document.id, false);
+            }}
+            className={`absolute top-3 left-3 h-5 w-5 rounded-full border z-30 flex items-center justify-center transition-all ${
+              isSelected 
+                ? 'bg-indigo-600 border-indigo-600 text-white shadow-sm' 
+                : 'bg-white/95 backdrop-blur-xs border-gray-300 text-transparent hover:border-indigo-500 hover:text-indigo-500 opacity-0 group-hover:opacity-100'
+            }`}
+          >
+            <Check className="h-3 w-3 stroke-[3]" />
+          </button>
+        )}
+
         {/* Subtle geometric grid background */}
         <div className="absolute inset-0 opacity-1 bg-[linear-gradient(to_right,#f3f4f6_1px,transparent_1px),linear-gradient(to_bottom,#f3f4f6_1px,transparent_1px)] bg-[size:14px_14px]" />
         
@@ -230,10 +280,9 @@ export default function DocumentCard({
               />
             </form>
           ) : (
-            <div className="flex items-start justify-between gap-1 group/title" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-start justify-between gap-1 group/title">
               <h3 
-                onClick={() => onOpen(document)}
-                className="text-sm font-medium text-gray-800 truncate cursor-pointer group-hover:text-indigo-600 flex-1 hover:underline decoration-indigo-400 decoration-2 underline-offset-2"
+                className="text-sm font-medium text-gray-800 truncate flex-1 hover:underline decoration-indigo-400 decoration-2 underline-offset-2"
                 title={document.title}
               >
                 {document.title}

@@ -28,7 +28,7 @@ import MicroSimulator from './MicroSimulator';
 interface DocumentEditorProps {
   document: Document;
   shelves: Shelf[];
-  onSave: (docId: string, updates: Partial<Document>, changeSummary?: string) => void;
+  onSave: (docId: string, updates: Partial<Document>, changeSummary?: string, parentId?: string | null) => void;
   onClose: () => void;
   initialShowSimulator?: boolean;
   documents: Document[];
@@ -885,98 +885,249 @@ export default function DocumentEditor({
             ) : activeSidebarTab === 'history' ? (
               <div className="flex flex-col gap-3 flex-grow overflow-hidden select-none">
                 <div className="flex flex-col">
-                  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Revision History</span>
+                  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Revision History Graph</span>
                   <p className="text-[10px] text-gray-450 leading-tight mt-1">
-                    Every save adds an immutable state snapshot. Open comparison logs to view changes line-by-line.
+                    Track edits and branching regression paths via interactive SVG network.
                   </p>
                 </div>
 
-                <div className="flex-1 overflow-y-auto pr-1 py-1 flex flex-col gap-2.5 max-h-[52vh] [scrollbar-width:thin]">
-                  {docVersions.slice().reverse().map((ver) => {
-                    const isActiveVer = ver.title === title && ver.content === content && ver.type === type && JSON.stringify(ver.tags) === JSON.stringify(tags);
-                    const dateFormatted = new Date(ver.updatedAt).toLocaleDateString('en-US', {
-                      month: 'short',
-                      day: 'numeric',
-                      hour: '2-digit',
-                      minute: '2-digit'
-                    });
+                {(() => {
+                  const docVersions = document.versions || [];
+                  const versionsForGraph = [...docVersions];
+                  
+                  // Sort chronologically (oldest first) to assign correct rows & parent links
+                  versionsForGraph.sort((a, b) => {
+                    return new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime();
+                  });
 
-                    return (
+                  const coords: { [key: string]: { x: number; y: number; col: number; row: number } } = {};
+                  const activeColumnsInRow: number[][] = [];
+
+                  versionsForGraph.forEach((ver, idx) => {
+                    let col = 0;
+                    if (idx > 0) {
+                      const parentId = ver.parentId;
+                      const prevVer = versionsForGraph[idx - 1];
+                      
+                      if (parentId === prevVer.id) {
+                        col = coords[prevVer.id]?.col || 0;
+                      } else if (!parentId) {
+                        col = 0;
+                      } else {
+                        const parentCoord = coords[parentId];
+                        if (parentCoord) {
+                          col = parentCoord.col + 1;
+                          while (activeColumnsInRow[idx]?.includes(col)) {
+                            col++;
+                          }
+                        }
+                      }
+                    }
+
+                    if (!activeColumnsInRow[idx]) activeColumnsInRow[idx] = [];
+                    activeColumnsInRow[idx].push(col);
+
+                    // Block intermediate columns for crossing lines
+                    if (idx > 0 && ver.parentId) {
+                      const parentIdx = versionsForGraph.findIndex(v => v.id === ver.parentId);
+                      if (parentIdx !== -1 && parentIdx < idx - 1) {
+                        for (let r = parentIdx + 1; r < idx; r++) {
+                          if (!activeColumnsInRow[r]) activeColumnsInRow[r] = [];
+                          activeColumnsInRow[r].push(col);
+                        }
+                      }
+                    }
+
+                    // Card block total spacing height is 132px. centerY is rowY
+                    const rowY = (versionsForGraph.length - 1 - idx) * 132 + 66;
+
+                    coords[ver.id || `v-init-${document.id}`] = {
+                      col,
+                      row: idx,
+                      x: 20 + col * 16,
+                      y: rowY,
+                    };
+                  });
+
+                  const maxCol = Math.max(...versionsForGraph.map(v => coords[v.id]?.col || 0), 0);
+                  const svgWidth = Math.max(48, 36 + maxCol * 16);
+                  const svgHeight = versionsForGraph.length * 132;
+
+                  return (
+                    <div className="flex-1 flex flex-row items-stretch overflow-hidden select-none">
+                      {/* Left side: SVG Commit Canvas */}
                       <div 
-                        key={ver.id || ver.versionNumber}
-                        className={`p-3 rounded-2xl border transition-all flex flex-col gap-1.5 bg-white ${
-                          isActiveVer 
-                            ? 'border-indigo-300 ring-2 ring-indigo-50/50 shadow-xs' 
-                            : 'border-gray-200/80 hover:border-gray-300 hover:shadow-xs'
-                        }`}
+                        className="overflow-y-auto overflow-x-hidden select-none border-r border-gray-200/50 scrollbar-none"
+                        style={{ width: `${svgWidth}px`, height: '52vh', scrollbarWidth: 'none' }}
                       >
-                        <div className="flex items-center justify-between gap-1.5">
-                          <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md font-mono ${
-                            isActiveVer 
-                              ? 'bg-indigo-50 text-indigo-700' 
-                              : 'bg-gray-100 text-gray-600'
-                          }`}>
-                            Revision v{ver.versionNumber}
-                          </span>
-                          <span className="text-[9px] text-gray-400 font-mono">
-                            {(ver.size / 1024).toFixed(2)} KB
-                          </span>
-                        </div>
+                        <svg width={svgWidth} height={svgHeight} className="overflow-visible">
+                          {/* Grid alignment lines */}
+                          {versionsForGraph.map((_, idx) => (
+                            <line 
+                              key={`guide-${idx}`} 
+                              x1={0} 
+                              y1={idx * 132 + 66} 
+                              x2={svgWidth} 
+                              y2={idx * 132 + 66} 
+                              stroke="#f3f4f6" 
+                              strokeWidth="1" 
+                              strokeDasharray="2,4" 
+                            />
+                          ))}
 
-                        <div className="flex flex-col select-text">
-                          <p className="text-xs font-semibold text-gray-800 break-words leading-tight capitalize">
-                            {ver.changeSummary || `Update ${ver.versionNumber}`}
-                          </p>
-                          <span className="text-[9px] text-gray-400 font-mono font-medium mt-1 inline-flex items-center gap-0.5">
-                            <Clock className="h-2.5 w-2.5" /> {dateFormatted}
-                          </span>
-                        </div>
+                          {/* Connective branch edges */}
+                          {versionsForGraph.map((ver) => {
+                            if (!ver.parentId) return null;
+                            const parent = versionsForGraph.find(v => v.id === ver.parentId);
+                            if (!parent) return null;
+                            
+                            const currentCoord = coords[ver.id];
+                            const parentCoord = coords[parent.id];
+                            if (!currentCoord || !parentCoord) return null;
 
-                        <div className="flex items-center gap-2 mt-1.5 pt-2 border-t border-dashed border-gray-100">
-                          <button
-                            id={`show-diff-${ver.id || ver.versionNumber}`}
-                            onClick={() => {
-                              setSelectedVersionForDiff(ver);
-                              setShowDiffModal(true);
-                            }}
-                            className="text-[10px] text-indigo-650 bg-indigo-50 hover:bg-indigo-100 px-2.5 py-1.5 rounded-lg font-bold cursor-pointer transition-all flex items-center gap-0.5"
-                          >
-                            Compare
-                          </button>
+                            const isReversion = ver.changeSummary?.toLowerCase().includes('restore') || ver.changeSummary?.toLowerCase().includes('revert');
+                            const strokeColor = isReversion ? '#10b981' : currentCoord.col === 0 ? '#6366f1' : '#a78bfa';
+                            const strokeDash = isReversion ? '3,3' : undefined;
 
-                          {!isActiveVer && (
-                            <button
-                              id={`restore-ver-${ver.id || ver.versionNumber}`}
-                              onClick={() => {
-                                if (confirm(`Revert document contents back to Revision Version ${ver.versionNumber}? Any unsaved changes on your editor will be replaced.`)) {
-                                  setTitle(ver.title);
-                                  setContent(ver.content);
-                                  setType(ver.type);
-                                  setTags(ver.tags);
+                            // Fluid Bezier layout curve
+                            const d = `M ${parentCoord.x} ${parentCoord.y} C ${parentCoord.x} ${(parentCoord.y + currentCoord.y) / 2}, ${currentCoord.x} ${(parentCoord.y + currentCoord.y) / 2}, ${currentCoord.x} ${currentCoord.y}`;
+                            
+                            return (
+                              <path
+                                key={`edge-${ver.id}-${parent.id}`}
+                                d={d}
+                                fill="none"
+                                stroke={strokeColor}
+                                strokeWidth="2.5"
+                                strokeDasharray={strokeDash}
+                              />
+                            );
+                          })}
 
-                                  // Instantly save/commit the reverted values directly
-                                  onSave(document.id, {
-                                    title: ver.title,
-                                    content: ver.content,
-                                    type: ver.type,
-                                    tags: ver.tags,
-                                    size: ver.size,
-                                    updatedAt: new Date().toISOString()
-                                  }, `Restored to Revision Version ${ver.versionNumber}`);
+                          {/* Nodes */}
+                          {versionsForGraph.map((ver) => {
+                            const coord = coords[ver.id];
+                            if (!coord) return null;
+                            const isActiveVer = ver.title === title && ver.content === content && ver.type === type && JSON.stringify(ver.tags) === JSON.stringify(tags);
+                            const isReversion = ver.changeSummary?.toLowerCase().includes('restore') || ver.changeSummary?.toLowerCase().includes('revert');
 
-                                  setIsSaved(true);
-                                }
-                              }}
-                              className="text-[10px] text-emerald-700 bg-emerald-50 hover:bg-emerald-100 px-2.5 py-1.5 rounded-lg font-bold cursor-pointer transition-all flex items-center gap-0.5 ml-auto"
-                            >
-                              <RotateCcw className="h-2.5 w-2.5" /> Revert
-                            </button>
-                          )}
-                        </div>
+                            return (
+                              <g key={`node-${ver.id}`}>
+                                {isActiveVer && (
+                                  <circle
+                                    cx={coord.x}
+                                    cy={coord.y}
+                                    r="8"
+                                    className="fill-indigo-100 stroke-indigo-300 animate-ping opacity-75"
+                                  />
+                                )}
+                                <circle
+                                  cx={coord.x}
+                                  cy={coord.y}
+                                  r={isActiveVer ? "5" : "4.5"}
+                                  fill={isActiveVer ? "#4f46e5" : isReversion ? "#10b981" : "#ffffff"}
+                                  stroke={isActiveVer ? "#4f46e5" : isReversion ? "#10b981" : coord.col === 0 ? "#6366f1" : "#a78bfa"}
+                                  strokeWidth="2.5"
+                                  title={ver.changeSummary}
+                                />
+                              </g>
+                            );
+                          })}
+                        </svg>
                       </div>
-                    );
-                  })}
-                </div>
+
+                      {/* Right side: Revision Cards */}
+                      <div className="flex-1 overflow-y-auto pl-2 pr-1 py-1 flex flex-col gap-0 max-h-[52vh] [scrollbar-width:thin]">
+                        {versionsForGraph.slice().reverse().map((ver) => {
+                          const isActiveVer = ver.title === title && ver.content === content && ver.type === type && JSON.stringify(ver.tags) === JSON.stringify(tags);
+                          const dateFormatted = new Date(ver.updatedAt).toLocaleDateString('en-US', {
+                            month: 'short',
+                            day: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit'
+                          });
+
+                          return (
+                            <div 
+                              key={ver.id || ver.versionNumber}
+                              className="h-[120px] mb-[12px] flex flex-col justify-center"
+                            >
+                              <div className={`p-3 rounded-2xl border transition-all flex flex-col gap-1 bg-white h-full justify-between ${
+                                isActiveVer 
+                                  ? 'border-indigo-300 ring-2 ring-indigo-50/50 shadow-xs' 
+                                  : 'border-gray-200/80 hover:border-gray-300 hover:shadow-xs'
+                              }`}>
+                                <div className="flex items-center justify-between gap-1.5">
+                                  <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md font-mono ${
+                                    isActiveVer 
+                                      ? 'bg-indigo-50 text-indigo-700' 
+                                      : 'bg-gray-100 text-gray-600'
+                                  }`}>
+                                    Revision v{ver.versionNumber}
+                                  </span>
+                                  <span className="text-[9px] text-gray-400 font-mono">
+                                    {(ver.size / 1024).toFixed(2)} KB
+                                  </span>
+                                </div>
+
+                                <div className="flex flex-col select-text">
+                                  <p className="text-xs font-semibold text-gray-800 break-words leading-none truncate capitalize" title={ver.changeSummary}>
+                                    {ver.changeSummary || `Update ${ver.versionNumber}`}
+                                  </p>
+                                  <span className="text-[9px] text-gray-400 font-mono font-medium mt-1 inline-flex items-center gap-0.5">
+                                    <Clock className="h-2.5 w-2.5" /> {dateFormatted}
+                                  </span>
+                                </div>
+
+                                <div className="flex items-center gap-2 mt-1 pt-1.5 border-t border-dashed border-gray-100">
+                                  <button
+                                    id={`show-diff-${ver.id || ver.versionNumber}`}
+                                    onClick={() => {
+                                      setSelectedVersionForDiff(ver);
+                                      setShowDiffModal(true);
+                                    }}
+                                    className="text-[10px] text-indigo-650 bg-indigo-50 hover:bg-indigo-100 px-2 py-1 rounded-lg font-bold cursor-pointer transition-all flex items-center gap-0.5"
+                                  >
+                                    Compare
+                                  </button>
+
+                                  {!isActiveVer && (
+                                    <button
+                                      id={`restore-ver-${ver.id || ver.versionNumber}`}
+                                      onClick={() => {
+                                        if (confirm(`Revert document contents back to Revision Version ${ver.versionNumber}? Any unsaved changes on your editor will be replaced.`)) {
+                                          setTitle(ver.title);
+                                          setContent(ver.content);
+                                          setType(ver.type);
+                                          setTags(ver.tags);
+
+                                          // Instantly save/commit the reverted values directly
+                                          onSave(document.id, {
+                                            title: ver.title,
+                                            content: ver.content,
+                                            type: ver.type,
+                                            tags: ver.tags,
+                                            size: ver.size,
+                                            updatedAt: new Date().toISOString()
+                                          }, `Restored to Revision Version ${ver.versionNumber}`, ver.id);
+
+                                          setIsSaved(true);
+                                        }
+                                      }}
+                                      className="text-[10px] text-emerald-700 bg-emerald-50 hover:bg-emerald-100 px-2 py-1 rounded-lg font-bold cursor-pointer transition-all flex items-center gap-0.5 ml-auto"
+                                    >
+                                      <RotateCcw className="h-2.5 w-2.5" /> Revert
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             ) : (
               <div className="flex flex-col gap-3 flex-grow overflow-hidden select-none">

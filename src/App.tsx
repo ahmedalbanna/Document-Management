@@ -20,9 +20,11 @@ import {
   RefreshCw,
   FolderOpen,
   RotateCcw,
-  Tag
+  Tag,
+  Download
 } from 'lucide-react';
 
+import JSZip from 'jszip';
 import { Document, Shelf, ActivityLog, DocumentType } from './types';
 import { INITIAL_SHELVES, INITIAL_DOCUMENTS } from './data/defaultData';
 import ShelfRow from './components/ShelfRow';
@@ -30,6 +32,7 @@ import DocumentCard from './components/DocumentCard';
 import DocumentEditor from './components/DocumentEditor';
 import DashboardStats from './components/DashboardStats';
 import UploadModal from './components/UploadModal';
+import MergeModal from './components/MergeModal';
 import { DocumentSearchIndex } from './utils/searchIndex';
 
 export default function App() {
@@ -48,6 +51,17 @@ export default function App() {
   const [autoRunSimulator, setAutoRunSimulator] = useState<boolean>(false);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [showStats, setShowStats] = useState(true);
+
+  // --- VCS & Selection states ---
+  const [selectedDocIds, setSelectedDocIds] = useState<string[]>([]);
+  const [mergeState, setMergeState] = useState<{
+    existingDoc: Document;
+    incomingContent: string;
+    incomingTitle: string;
+    incomingType: DocumentType;
+    incomingShelfId: string;
+    incomingSize: number;
+  } | null>(null);
 
   // --- Creation forms toggle ---
   const [showNewShelfForm, setShowNewShelfForm] = useState(false);
@@ -111,6 +125,331 @@ export default function App() {
       timestamp: new Date().toISOString(),
     };
     setActivities(prev => [newLog, ...prev]);
+  };
+
+  // --- Multi-Selection & Selective Export Bundle handlers ---
+  const handleToggleSelectDoc = (docId: string, isShift: boolean, shelfDocs?: Document[]) => {
+    setSelectedDocIds(prev => {
+      const isSelected = prev.includes(docId);
+      
+      if (isShift && shelfDocs && prev.length > 0) {
+        const lastSelectedId = prev[prev.length - 1];
+        const lastIdx = shelfDocs.findIndex(d => d.id === lastSelectedId);
+        const currentIdx = shelfDocs.findIndex(d => d.id === docId);
+        
+        if (lastIdx !== -1 && currentIdx !== -1) {
+          const start = Math.min(lastIdx, currentIdx);
+          const end = Math.max(lastIdx, currentIdx);
+          const rangeIds = shelfDocs.slice(start, end + 1).map(d => d.id);
+          
+          const next = [...prev];
+          rangeIds.forEach(id => {
+            if (!next.includes(id)) {
+              next.push(id);
+            }
+          });
+          return next;
+        }
+      }
+      
+      if (isSelected) {
+        return prev.filter(id => id !== docId);
+      } else {
+        return [...prev, docId];
+      }
+    });
+  };
+
+  const handleExportZIP = async () => {
+    const zip = new JSZip();
+    
+    selectedDocIds.forEach(id => {
+      const doc = documents.find(d => d.id === id);
+      if (doc) {
+        const frontmatter = `---
+title: "${doc.title.replace(/"/g, '\\"')}"
+type: ${doc.type}
+category: ${doc.category}
+tags: [${doc.tags.map(t => `"${t}"`).join(', ')}]
+createdAt: ${doc.createdAt}
+updatedAt: ${doc.updatedAt}
+size: ${doc.size} bytes
+---
+
+${doc.content}`;
+        
+        const fileName = `${doc.title.replace(/[^a-zA-Z0-9_-]/g, '_')}.md`;
+        zip.file(fileName, frontmatter);
+        logAction(`Exported "${doc.title}" to ZIP`, 'download', doc.id);
+      }
+    });
+    
+    const content = await zip.generateAsync({ type: 'blob' });
+    const url = URL.createObjectURL(content);
+    const link = window.document.createElement('a');
+    link.href = url;
+    link.download = `DocWorkspace_Bundle_${Date.now()}.zip`;
+    link.click();
+    URL.revokeObjectURL(url);
+    setSelectedDocIds([]);
+  };
+
+  const handleCompileReport = () => {
+    const selectedDocs = documents.filter(d => selectedDocIds.includes(d.id));
+    if (selectedDocs.length === 0) return;
+    
+    const cssStyles = `
+      body {
+        font-family: 'Inter', system-ui, sans-serif;
+        line-height: 1.6;
+        color: #1f2937;
+        max-width: 800px;
+        margin: 0 auto;
+        padding: 40px 20px;
+        background: #f9fafb;
+      }
+      .report-container {
+        background: white;
+        padding: 50px;
+        border-radius: 20px;
+        box-shadow: 0 4px 30px rgba(0,0,0,0.03);
+        border: 1px solid #f3f4f6;
+      }
+      h1, h2, h3 {
+        color: #111827;
+        font-weight: 700;
+        letter-spacing: -0.025em;
+      }
+      .cover-page {
+        border-bottom: 2px solid #e5e7eb;
+        padding-bottom: 40px;
+        margin-bottom: 40px;
+        text-align: center;
+      }
+      .cover-title {
+        font-size: 36px;
+        margin-bottom: 10px;
+        color: #4f46e5;
+        font-weight: 800;
+      }
+      .cover-meta {
+        font-size: 13px;
+        color: #6b7280;
+        margin-top: 20px;
+        font-family: monospace;
+        line-height: 2;
+      }
+      .toc {
+        background: #f8fafc;
+        padding: 24px;
+        border-radius: 16px;
+        margin-bottom: 40px;
+        border: 1px solid #e2e8f0;
+      }
+      .toc h2 {
+        margin-top: 0;
+        font-size: 18px;
+        color: #0f172a;
+      }
+      .toc-list {
+        list-style-type: none;
+        padding-left: 0;
+      }
+      .toc-item {
+        margin: 10px 0;
+        border-bottom: 1px dashed #e2e8f0;
+        padding-bottom: 6px;
+        display: flex;
+        justify-content: space-between;
+      }
+      .toc-link {
+        color: #4f46e5;
+        text-decoration: none;
+        font-size: 14px;
+        font-weight: 600;
+      }
+      .toc-link:hover {
+        text-decoration: underline;
+      }
+      .section-break {
+        page-break-before: always;
+        border-top: 1px solid #e2e8f0;
+        margin-top: 60px;
+        padding-top: 40px;
+      }
+      .doc-header {
+        margin-bottom: 24px;
+      }
+      .doc-title {
+        font-size: 24px;
+        color: #1e293b;
+        margin-bottom: 8px;
+      }
+      .doc-meta {
+        display: flex;
+        gap: 16px;
+        font-size: 11px;
+        color: #64748b;
+        font-family: monospace;
+      }
+      .doc-tags {
+        display: flex;
+        gap: 6px;
+        margin-top: 8px;
+      }
+      .doc-tag {
+        background: #f1f5f9;
+        color: #475569;
+        padding: 2px 8px;
+        border-radius: 6px;
+        font-size: 10px;
+        font-weight: 600;
+      }
+      pre {
+        background: #0f172a;
+        color: #f8fafc;
+        padding: 16px;
+        border-radius: 12px;
+        overflow-x: auto;
+        font-family: 'JetBrains Mono', 'Fira Code', monospace;
+        font-size: 12px;
+        line-height: 1.5;
+        margin: 20px 0;
+      }
+      code {
+        font-family: 'JetBrains Mono', monospace;
+        background: #f1f5f9;
+        padding: 2px 5px;
+        border-radius: 4px;
+        font-size: 13px;
+        color: #0f172a;
+      }
+      pre code {
+        background: transparent;
+        padding: 0;
+        color: inherit;
+        font-size: inherit;
+      }
+      blockquote {
+        border-left: 4px solid #6366f1;
+        padding-left: 18px;
+        margin: 20px 0;
+        color: #475569;
+        font-style: italic;
+        background: #f8fafc;
+        padding-top: 10px;
+        padding-bottom: 10px;
+        border-top-right-radius: 8px;
+        border-bottom-right-radius: 8px;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 24px 0;
+      }
+      th, td {
+        border: 1px solid #e2e8f0;
+        padding: 12px;
+        text-align: left;
+        font-size: 13px;
+      }
+      th {
+        background: #f8fafc;
+        font-weight: 700;
+        color: #334155;
+      }
+    `;
+
+    let tocHtml = '';
+    let contentHtml = '';
+    
+    selectedDocs.forEach((doc, idx) => {
+      const anchorId = `doc-${doc.id}`;
+      tocHtml += `
+        <li class="toc-item">
+          <a class="toc-link" href="#${anchorId}">${idx + 1}. ${doc.title}</a>
+          <span style="font-size: 11px; color: #94a3b8; font-family: monospace;">${doc.type.toUpperCase()}</span>
+        </li>
+      `;
+      
+      let parsedContent = doc.content
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+
+      parsedContent = parsedContent.replace(/^# (.*$)/gim, '<h1>$1</h1>');
+      parsedContent = parsedContent.replace(/^## (.*$)/gim, '<h2>$1</h2>');
+      parsedContent = parsedContent.replace(/^### (.*$)/gim, '<h3>$1</h3>');
+      parsedContent = parsedContent.replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>');
+      parsedContent = parsedContent.replace(/\*\*(.*?)\*\"/g, '<strong>$1</strong>');
+      parsedContent = parsedContent.replace(/\*(.*?)\*/g, '<em>$1</em>');
+      parsedContent = parsedContent.replace(/^\> (.*$)/gim, '<blockquote>$1</blockquote>');
+      parsedContent = parsedContent.replace(/^\- (.*$)/gim, '<ul><li>$1</li></ul>');
+      parsedContent = parsedContent.replace(/<\/ul>\s*<ul>/g, '');
+      
+      contentHtml += `
+        <div id="${anchorId}" class="section-break">
+          <div class="doc-header">
+            <h2 class="doc-title">${doc.title}</h2>
+            <div class="doc-meta">
+              <span>Type: ${doc.type.toUpperCase()}</span>
+              <span>Category/Shelf: ${doc.category}</span>
+              <span>Compiled: ${new Date().toLocaleDateString()}</span>
+            </div>
+            <div class="doc-tags">
+              ${doc.tags.map(t => `<span class="doc-tag">${t}</span>`).join('')}
+            </div>
+          </div>
+          <div class="doc-body" style="font-size: 14px; color: #334155; line-height: 1.7;">
+            ${parsedContent}
+          </div>
+        </div>
+      `;
+    });
+
+    const fullHtml = `<!DOCTYPE html>
+  <html>
+  <head>
+    <meta charset="utf-8">
+    <title>Unified Technical Report - DocWorkspace</title>
+    <style>${cssStyles}</style>
+  </head>
+  <body>
+    <div class="report-container">
+      <div class="cover-page">
+        <h1 class="cover-title">Unified Technical Report</h1>
+        <p style="color: #64748b; font-size: 15px; font-weight: 500;">Compiled Workspace Document Bundle</p>
+        <div class="cover-meta">
+          <p>DATE: ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}</p>
+          <p>COMPILED DOCUMENTS: ${selectedDocs.length}</p>
+          <p>ORGANIZATION: ahmedalbanna966 Workspace</p>
+        </div>
+      </div>
+      
+      <div class="toc">
+        <h2>Table of Contents</h2>
+        <ul class="toc-list">
+          ${tocHtml}
+        </ul>
+      </div>
+      
+      <div class="content">
+        ${contentHtml}
+      </div>
+    </div>
+  </body>
+  </html>`;
+
+    const blob = new Blob([fullHtml], { type: 'text/html;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = window.document.createElement('a');
+    link.href = url;
+    link.download = `Unified_Technical_Report_${Date.now()}.html`;
+    link.click();
+    URL.revokeObjectURL(url);
+    
+    logAction(`Compiled technical report with ${selectedDocs.length} files`, 'download');
+    setSelectedDocIds([]);
   };
 
   // --- Document core actions ---
@@ -183,7 +522,7 @@ export default function App() {
     }));
   };
 
-  const handleSaveDocEdits = (docId: string, updates: Partial<Document>, changeSummary?: string) => {
+  const handleSaveDocEdits = (docId: string, updates: Partial<Document>, changeSummary?: string, parentId?: string | null) => {
     let updatedDoc: Document | null = null;
     setDocuments(prev => {
       const next = prev.map(d => {
@@ -202,12 +541,16 @@ export default function App() {
               updatedAt: d.updatedAt || d.createdAt || new Date().toISOString(),
               changeSummary: 'Original document state',
               size: d.size,
+              parentId: null,
             });
           }
           
           const nextVerNum = versions.length + 1;
           const newSize = updates.content !== undefined ? new Blob([updates.content]).size : d.size;
           
+          // Determine parent id
+          const resolvedParentId = parentId !== undefined ? parentId : (versions.length > 0 ? versions[versions.length - 1].id : null);
+
           // Append the new state as the next version
           versions.push({
             id: `v-${Date.now()}-${nextVerNum}`,
@@ -219,6 +562,7 @@ export default function App() {
             updatedAt: new Date().toISOString(),
             changeSummary: changeSummary || `Revision ${nextVerNum}`,
             size: newSize,
+            parentId: resolvedParentId,
           });
 
           updatedDoc = {
@@ -270,6 +614,21 @@ Enter standard paragraphs or lists...`,
 
   // Custom File Uploader callback
   const handleUploadDoc = (title: string, content: string, type: DocumentType, shelfId: string, size: number) => {
+    // Check if document with same title already exists
+    const existing = documents.find(d => d.title.toLowerCase() === title.toLowerCase() && !d.isArchived);
+    if (existing) {
+      setMergeState({
+        existingDoc: existing,
+        incomingContent: content,
+        incomingTitle: title,
+        incomingType: type,
+        incomingShelfId: shelfId,
+        incomingSize: size,
+      });
+      setShowUploadModal(false); // Close upload modal since we are resolving the conflict
+      return;
+    }
+
     const uid = `doc-${Date.now()}`;
     const targetShelf = shelves.find(s => s.id === shelfId);
     const newDoc: Document = {
@@ -668,6 +1027,8 @@ Enter standard paragraphs or lists...`,
                     onUpdateShelf={handleUpdateShelf}
                     onDeleteShelf={handleDeleteShelf}
                     onRunDoc={handleRunDocSimulator}
+                    selectedDocIds={selectedDocIds}
+                    onToggleSelectDoc={handleToggleSelectDoc}
                   />
                 );
               })}
@@ -820,6 +1181,8 @@ Enter standard paragraphs or lists...`,
                             onMoveShelf={handleMoveDocShelf}
                             onRename={handleRenameDoc}
                             onRun={handleRunDocSimulator}
+                            selectedDocIds={selectedDocIds}
+                            onToggleSelectDoc={(id, isShift) => handleToggleSelectDoc(id, isShift, filteredDocs)}
                           />
                         </div>
                       )}
@@ -867,6 +1230,84 @@ Enter standard paragraphs or lists...`,
             shelves={shelves}
             onUpload={handleUploadDoc}
             onClose={() => setShowUploadModal(false)}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* 7. FLOATING EXPORT BUNDLE TOOLBAR */}
+      <AnimatePresence>
+        {selectedDocIds.length > 0 && (
+          <motion.div
+            id="floating-export-toolbar"
+            initial={{ opacity: 0, y: 50, x: '-50%' }}
+            animate={{ opacity: 1, y: 0, x: '-50%' }}
+            exit={{ opacity: 0, y: 50, x: '-50%' }}
+            className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-gray-900 border border-gray-800 text-white rounded-2xl px-6 py-4 shadow-2xl z-[80] flex items-center gap-6 select-none"
+          >
+            <div className="flex flex-col gap-0.5">
+              <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest font-mono">Export Bundles</span>
+              <span className="text-xs font-semibold">{selectedDocIds.length} cards selected</span>
+            </div>
+            
+            <div className="h-6 w-px bg-gray-800" />
+            
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                id="export-zip-btn"
+                onClick={handleExportZIP}
+                className="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-sm transition-all cursor-pointer flex items-center gap-1.5"
+              >
+                <Download className="h-3.5 w-3.5" /> Export .ZIP
+              </button>
+              
+              <button
+                type="button"
+                id="compile-report-btn"
+                onClick={handleCompileReport}
+                className="px-3 py-2 bg-gray-800 hover:bg-gray-700 text-white border border-gray-750 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1.5"
+              >
+                <Sparkles className="h-3.5 w-3.5 text-indigo-400 fill-current animate-pulse" /> Compile Report
+              </button>
+              
+              <button
+                type="button"
+                id="clear-selection-btn"
+                onClick={() => setSelectedDocIds([])}
+                className="px-3 py-2 hover:bg-gray-800 text-gray-400 hover:text-white text-xs font-semibold rounded-xl transition-all cursor-pointer"
+              >
+                Clear
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* 8. TITLE COLLISION SMART 3-WAY MERGE RESOLUTION */}
+      <AnimatePresence>
+        {mergeState && (
+          <MergeModal
+            localTitle={mergeState.existingDoc.title}
+            localContent={mergeState.existingDoc.content}
+            ancestorContent={
+              mergeState.existingDoc.versions && mergeState.existingDoc.versions.length > 0
+                ? mergeState.existingDoc.versions[mergeState.existingDoc.versions.length - 1].content
+                : mergeState.existingDoc.content
+            }
+            incomingContent={mergeState.incomingContent}
+            onResolve={(mergedContent) => {
+              // Create a brand new commit version containing the resolved merge
+              handleSaveDocEdits(
+                mergeState.existingDoc.id,
+                { content: mergedContent, size: new Blob([mergedContent]).size },
+                `Merged changes from external file upload of "${mergeState.incomingTitle}"`,
+                mergeState.existingDoc.versions && mergeState.existingDoc.versions.length > 0
+                  ? mergeState.existingDoc.versions[mergeState.existingDoc.versions.length - 1].id
+                  : null
+              );
+              setMergeState(null);
+            }}
+            onCancel={() => setMergeState(null)}
           />
         )}
       </AnimatePresence>
