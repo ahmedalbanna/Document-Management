@@ -54,6 +54,10 @@ export default function DocumentCard({
     switch (document.type) {
       case 'markdown':
         return <FileCode className="h-5 w-5 text-indigo-500" />;
+      case 'html':
+        return <FileCode className="h-5 w-5 text-sky-500" />;
+      case 'image':
+        return <Layers className="h-5 w-5 text-purple-500" />;
       case 'json':
         return <FileJson className="h-5 w-5 text-amber-500" />;
       case 'pdf':
@@ -68,6 +72,8 @@ export default function DocumentCard({
   const getBadgeColor = () => {
     switch (document.type) {
       case 'markdown': return 'bg-indigo-50/70 text-indigo-700 border-indigo-100';
+      case 'html': return 'bg-sky-50/70 text-sky-700 border-sky-100';
+      case 'image': return 'bg-purple-50/70 text-purple-700 border-purple-100';
       case 'json': return 'bg-amber-50/70 text-amber-700 border-amber-100';
       case 'pdf': return 'bg-rose-50/70 text-rose-700 border-rose-100';
       case 'spreadsheet': return 'bg-emerald-50/70 text-emerald-700 border-emerald-100';
@@ -400,14 +406,31 @@ export default function DocumentCard({
             <button
               id={`download-btn-${document.id}`}
               onClick={() => {
-                // Download file as attachment
-                const blob = new Blob([document.content], { type: 'text/plain;charset=utf-8' });
-                const url = URL.createObjectURL(blob);
+                let url = '';
+                let ext = 'txt';
+                if (document.type === 'image') {
+                  const match = document.content.match(/!\[.*?\]\((.*?)\)/);
+                  const imgData = match ? match[1] : document.content;
+                  if (imgData.startsWith('data:image')) {
+                    url = imgData;
+                    // extract ext like png, jpeg
+                    ext = imgData.split(';')[0].split('/')[1] || 'png';
+                  } else {
+                    const blob = new Blob([document.content], { type: 'text/plain;charset=utf-8' });
+                    url = URL.createObjectURL(blob);
+                  }
+                } else {
+                  const blob = new Blob([document.content], { type: 'text/plain;charset=utf-8' });
+                  url = URL.createObjectURL(blob);
+                  ext = document.type === 'json' ? 'json' : document.type === 'markdown' ? 'md' : document.type === 'html' ? 'html' : document.type === 'spreadsheet' ? 'csv' : 'txt';
+                }
                 const link = window.document.createElement('a');
                 link.href = url;
-                link.download = `${document.title.replace(/\s+/g, '_')}.${document.type === 'json' ? 'json' : document.type === 'markdown' ? 'md' : 'txt'}`;
+                link.download = `${document.title.replace(/\s+/g, '_')}.${ext}`;
                 link.click();
-                URL.revokeObjectURL(url);
+                if (!url.startsWith('data:image')) {
+                  URL.revokeObjectURL(url);
+                }
               }}
               className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50/80 rounded-lg transition-colors"
               title="Download File"

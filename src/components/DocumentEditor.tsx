@@ -24,6 +24,10 @@ import { Document, Shelf, DocumentVersion } from '../types';
 import { computeLineDiff } from '../utils/diff';
 import MathRenderer from './MathRenderer';
 import MicroSimulator from './MicroSimulator';
+import ImageEditor from './ImageEditor';
+import HtmlEditor from './HtmlEditor';
+import CsvEditor from './CsvEditor';
+import MarkdownEditor from './MarkdownEditor';
 
 interface DocumentEditorProps {
   document: Document;
@@ -570,18 +574,20 @@ export default function DocumentEditor({
           </div>
 
           <div className="flex items-center gap-2.5">
-            <button
-              id="editor-toggle-preview"
-              onClick={() => setPreviewMode(!previewMode)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-medium cursor-pointer transition-all ${
-                previewMode
-                  ? 'bg-indigo-550 border-indigo-600 text-white hover:bg-indigo-700'
-                  : 'bg-white border-gray-200 text-gray-600 hover:text-gray-900 hover:border-gray-300'
-              }`}
-            >
-              <BookOpen className="h-3.5 w-3.5" />
-              {previewMode ? 'Edit Mode' : 'Preview Live'}
-            </button>
+            {!['image', 'html', 'spreadsheet', 'markdown'].includes(type) && (
+              <button
+                id="editor-toggle-preview"
+                onClick={() => setPreviewMode(!previewMode)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-medium cursor-pointer transition-all ${
+                  previewMode
+                    ? 'bg-indigo-550 border-indigo-600 text-white hover:bg-indigo-700'
+                    : 'bg-white border-gray-200 text-gray-600 hover:text-gray-900 hover:border-gray-300'
+                }`}
+              >
+                <BookOpen className="h-3.5 w-3.5" />
+                {previewMode ? 'Edit Mode' : 'Preview Live'}
+              </button>
+            )}
 
             <button
               id="editor-save-btn"
@@ -619,101 +625,121 @@ export default function DocumentEditor({
         <div className="flex-1 flex overflow-hidden min-h-0">
           
           {/* Main workspace (Editor and Preview Pane) */}
-          <div className="flex-1 flex overflow-hidden split-pane divide-x divide-gray-100">
-            {/* LEFT: Plain Text Area (hidden in total previewMode) */}
-            {!previewMode && (
-              <div className="flex-1 flex flex-col bg-white min-w-0 h-full relative">
-                <textarea
-                  id="editor-textarea"
-                  value={content}
-                  onChange={handleTextareaChange}
-                  onKeyDown={handleTextareaKeyDown}
-                  className="flex-grow p-6 resize-none focus:outline-none text-sm text-gray-800 font-mono leading-relaxed bg-white placeholder-gray-300 overflow-y-auto"
-                  placeholder="Start writing... Type '[[' to link pages. Supports markdown templates (# headers, - lists, tables, code)"
-                />
-                
-                {/* Wiki Autocomplete popover */}
-                <AnimatePresence>
-                  {autocompleteState.show && (() => {
-                    const suggestions = documents
-                      .filter(d => d.id !== document.id && !d.isArchived)
-                      .filter(d => d.title.toLowerCase().includes(autocompleteState.query.toLowerCase()));
-
-                    if (suggestions.length === 0) return null;
-
-                    return (
-                      <motion.div
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: 10 }}
-                        className="absolute bottom-6 left-6 bg-white border border-gray-200 rounded-2xl shadow-xl p-3 z-30 w-72 max-h-60 flex flex-col overflow-hidden select-none"
-                      >
-                        <div className="text-[10px] uppercase font-bold text-gray-400 tracking-wider mb-2 flex items-center justify-between border-b border-gray-100 pb-1.5 shrink-0">
-                          <span>Autocomplete Wiki-Link</span>
-                          <span className="font-mono text-gray-300 font-normal">↑↓ Enter</span>
-                        </div>
-                        <div className="flex-grow overflow-y-auto pr-1 flex flex-col gap-1 [scrollbar-width:thin]">
-                          {suggestions.map((suggestion, idx) => {
-                            const isFocused = idx === autocompleteState.focusedIndex;
-                            return (
-                              <button
-                                key={suggestion.id}
-                                id={`autocomplete-item-${idx}`}
-                                type="button"
-                                onClick={() => handleSelectDocumentLink(suggestion.title)}
-                                onMouseEnter={() => setAutocompleteState(prev => ({ ...prev, focusedIndex: idx }))}
-                                className={`w-full text-left text-xs px-3 py-1.5 rounded-xl flex items-center justify-between transition-colors cursor-pointer ${
-                                  isFocused 
-                                    ? 'bg-indigo-50 text-indigo-750 font-semibold' 
-                                    : 'text-gray-600 hover:bg-gray-50'
-                                }`}
-                              >
-                                <span className="truncate pr-2">{suggestion.title}</span>
-                                <span className="text-[9px] font-mono opacity-50 bg-gray-100 px-1 py-0.2 rounded border shrink-0">
-                                  {suggestion.type}
-                                </span>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </motion.div>
-                    );
-                  })()}
-                </AnimatePresence>
+          <div className="flex-1 flex overflow-hidden split-pane">
+            {type === 'image' ? (
+              <div className="flex-1 p-6 overflow-y-auto">
+                <ImageEditor content={content} onChange={(newVal) => { setContent(newVal); setIsSaved(false); }} title={title} />
               </div>
-            )}
+            ) : type === 'html' ? (
+              <div className="flex-1 p-6 overflow-y-auto">
+                <HtmlEditor content={content} onChange={(newVal) => { setContent(newVal); setIsSaved(false); }} title={title} />
+              </div>
+            ) : type === 'spreadsheet' ? (
+              <div className="flex-1 p-6 overflow-y-auto">
+                <CsvEditor content={content} onChange={(newVal) => { setContent(newVal); setIsSaved(false); }} title={title} />
+              </div>
+            ) : type === 'markdown' ? (
+              <div className="flex-1 p-6 overflow-y-auto">
+                <MarkdownEditor content={content} onChange={(newVal) => { setContent(newVal); setIsSaved(false); }} renderMarkdown={renderMarkdown} title={title} />
+              </div>
+            ) : (
+              <div className="flex-1 flex overflow-hidden divide-x divide-gray-100 w-full">
+                {/* LEFT: Plain Text Area (hidden in total previewMode) */}
+                {!previewMode && (
+                  <div className="flex-1 flex flex-col bg-white min-w-0 h-full relative">
+                    <textarea
+                      id="editor-textarea"
+                      value={content}
+                      onChange={handleTextareaChange}
+                      onKeyDown={handleTextareaKeyDown}
+                      className="flex-grow p-6 resize-none focus:outline-none text-sm text-gray-800 font-mono leading-relaxed bg-white placeholder-gray-300 overflow-y-auto"
+                      placeholder="Start writing... Type '[[' to link pages. Supports markdown templates (# headers, - lists, tables, code)"
+                    />
+                    
+                    {/* Wiki Autocomplete popover */}
+                    <AnimatePresence>
+                      {autocompleteState.show && (() => {
+                        const suggestions = documents
+                          .filter(d => d.id !== document.id && !d.isArchived)
+                          .filter(d => d.title.toLowerCase().includes(autocompleteState.query.toLowerCase()));
 
-            {/* RIGHT: High-fidelity Live Rendering (shown in previewMode, or alongside if wide screen and split mode mimics active) */}
-            {(previewMode || true) && (
-              <div className={`flex-1 bg-gray-50/50 p-6 overflow-y-auto ${!previewMode ? 'hidden md:block' : 'block'}`}>
-                <div className="max-w-3xl mx-auto bg-white rounded-2xl border border-gray-100 shadow-[0_4px_20px_-4px_rgba(0,0,0,0.02)] p-8 min-h-full">
-                  <div className="mb-4 text-[10px] font-bold text-indigo-400 uppercase tracking-widest flex items-center gap-1">
-                    <Sparkles className="h-3 w-3" /> Live Render Preview
+                        if (suggestions.length === 0) return null;
+
+                        return (
+                          <motion.div
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: 10 }}
+                            className="absolute bottom-6 left-6 bg-white border border-gray-200 rounded-2xl shadow-xl p-3 z-30 w-72 max-h-60 flex flex-col overflow-hidden select-none"
+                          >
+                            <div className="text-[10px] uppercase font-bold text-gray-400 tracking-wider mb-2 flex items-center justify-between border-b border-gray-100 pb-1.5 shrink-0">
+                              <span>Autocomplete Wiki-Link</span>
+                              <span className="font-mono text-gray-300 font-normal">↑↓ Enter</span>
+                            </div>
+                            <div className="flex-grow overflow-y-auto pr-1 flex flex-col gap-1 [scrollbar-width:thin]">
+                              {suggestions.map((suggestion, idx) => {
+                                const isFocused = idx === autocompleteState.focusedIndex;
+                                return (
+                                  <button
+                                    key={suggestion.id}
+                                    id={`autocomplete-item-${idx}`}
+                                    type="button"
+                                    onClick={() => handleSelectDocumentLink(suggestion.title)}
+                                    onMouseEnter={() => setAutocompleteState(prev => ({ ...prev, focusedIndex: idx }))}
+                                    className={`w-full text-left text-xs px-3 py-1.5 rounded-xl flex items-center justify-between transition-colors cursor-pointer ${
+                                      isFocused 
+                                        ? 'bg-indigo-50 text-indigo-750 font-semibold' 
+                                        : 'text-gray-600 hover:bg-gray-50'
+                                    }`}
+                                  >
+                                    <span className="truncate pr-2">{suggestion.title}</span>
+                                    <span className="text-[9px] font-mono opacity-50 bg-gray-100 px-1 py-0.2 rounded border shrink-0">
+                                      {suggestion.type}
+                                    </span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </motion.div>
+                        );
+                      })()}
+                    </AnimatePresence>
                   </div>
-                  <h1 className="text-2xl font-bold text-gray-850 mb-6 font-sans drop-shadow-sm">{title || 'Untitled'}</h1>
-                  {/* Interactive Playground Banner */}
-                  {(category === 'shelf-repetitive-bounce' || category === 'shelf-deep-parity' || category === 'shelf-even-product') && (
-                    <div className="bg-gradient-to-br from-indigo-50/60 to-purple-50/60 border border-indigo-100/40 rounded-2xl p-4 mb-6 flex items-center justify-between shadow-xs select-none">
-                      <div className="flex flex-col gap-0.5">
-                        <span className="text-[10px] uppercase tracking-wider font-extrabold text-indigo-600 flex items-center gap-1.5">
-                          <Zap className="h-3.5 w-3.5 fill-indigo-100 text-indigo-500 animate-pulse" /> Live Interactive Sandbox
-                        </span>
-                        <p className="text-xs text-indigo-950 font-bold mt-1">This document contains executable configurations.</p>
-                        <p className="text-[10px] text-indigo-600 font-medium">Run the mini client-side simulation playground.</p>
+                )}
+
+                {/* RIGHT: High-fidelity Live Rendering (shown in previewMode, or alongside if wide screen and split mode mimics active) */}
+                {(previewMode || true) && (
+                  <div className={`flex-1 bg-gray-50/50 p-6 overflow-y-auto ${!previewMode ? 'hidden md:block' : 'block'}`}>
+                    <div className="max-w-3xl mx-auto bg-white rounded-2xl border border-gray-100 shadow-[0_4px_20px_-4px_rgba(0,0,0,0.02)] p-8 min-h-full">
+                      <div className="mb-4 text-[10px] font-bold text-indigo-400 uppercase tracking-widest flex items-center gap-1">
+                        <Sparkles className="h-3 w-3" /> Live Render Preview
                       </div>
-                      <button
-                        id="editor-launch-simulator"
-                        onClick={() => setShowSimulator(true)}
-                        className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-md shadow-indigo-150 transition-all cursor-pointer flex items-center gap-1.5 shrink-0"
-                      >
-                        <Play className="h-3 w-3 fill-current" /> Run Simulator
-                      </button>
+                      <h1 className="text-2xl font-bold text-gray-850 mb-6 font-sans drop-shadow-sm">{title || 'Untitled'}</h1>
+                      {/* Interactive Playground Banner */}
+                      {(category === 'shelf-repetitive-bounce' || category === 'shelf-deep-parity' || category === 'shelf-even-product') && (
+                        <div className="bg-gradient-to-br from-indigo-50/60 to-purple-50/60 border border-indigo-100/40 rounded-2xl p-4 mb-6 flex items-center justify-between shadow-xs select-none">
+                          <div className="flex flex-col gap-0.5">
+                            <span className="text-[10px] uppercase tracking-wider font-extrabold text-indigo-600 flex items-center gap-1.5">
+                              <Zap className="h-3.5 w-3.5 fill-indigo-100 text-indigo-500 animate-pulse" /> Live Interactive Sandbox
+                            </span>
+                            <p className="text-xs text-indigo-950 font-bold mt-1">This document contains executable configurations.</p>
+                            <p className="text-[10px] text-indigo-600 font-medium">Run the mini client-side simulation playground.</p>
+                          </div>
+                          <button
+                            id="editor-launch-simulator"
+                            onClick={() => setShowSimulator(true)}
+                            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-md shadow-indigo-150 transition-all cursor-pointer flex items-center gap-1.5 shrink-0"
+                          >
+                            <Play className="h-3.5 w-3.5 fill-current" /> Run Simulator
+                          </button>
+                        </div>
+                      )}
+                      <div className="border-t border-gray-100 pt-6">
+                        {renderMarkdown(content)}
+                      </div>
                     </div>
-                  )}
-                  <div className="border-t border-gray-100 pt-6">
-                    {renderMarkdown(content)}
                   </div>
-                </div>
+                )}
               </div>
             )}
           </div>
@@ -806,6 +832,8 @@ export default function DocumentEditor({
                       <option value="markdown">Markdown (.md)</option>
                       <option value="text">Plain Text (.txt)</option>
                       <option value="json">Structured JSON (.json)</option>
+                      <option value="html">HTML Layout (.html)</option>
+                      <option value="image">PNG Image (.png)</option>
                       <option value="pdf">Secured Doc (.pdf)</option>
                       <option value="spreadsheet">Parity Sheet (.csv)</option>
                     </select>

@@ -36,6 +36,8 @@ export default function UploadModal({
       type = 'markdown';
     } else if (extension === 'json') {
       type = 'json';
+    } else if (extension === 'html' || extension === 'htm') {
+      type = 'html';
     } else if (extension === 'csv') {
       type = 'spreadsheet';
     } else if (extension === 'pdf') {
@@ -52,7 +54,7 @@ export default function UploadModal({
         const result = e.target?.result as string;
         setParsedFile({
           name: file.name.replace(/\.[^/.]+$/, ""), // remove extension
-          content: `![Uploaded Image](${result.slice(0, 1000)}... Data truncated for storage)`,
+          content: `![Uploaded Image](${result})`,
           size: file.size,
           type: 'image',
         });
@@ -193,7 +195,7 @@ export default function UploadModal({
                 ref={fileInputRef}
                 type="file"
                 className="hidden"
-                accept=".txt,.md,.json,.csv,.xml,.png,.jpg,.jpeg,.webp"
+                accept=".txt,.md,.json,.csv,.xml,.png,.jpg,.jpeg,.webp,.html,.htm"
                 onChange={handleFileChange}
               />
               <div className="p-3 bg-gray-50 text-gray-400 group-hover:text-indigo-600 rounded-full border border-gray-100">
@@ -201,7 +203,7 @@ export default function UploadModal({
               </div>
               <div className="flex flex-col gap-1">
                 <span className="text-xs font-semibold">Drag & drop files here, or click to browse</span>
-                <span className="text-[10px] text-gray-450">Supports standard formats (.txt, .md, .json, .csv) up to 2 MB</span>
+                <span className="text-[10px] text-gray-450">Supports standard formats (.txt, .md, .json, .csv, .html, .png) up to 2 MB</span>
               </div>
             </div>
           ) : (

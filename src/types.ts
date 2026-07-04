@@ -1,4 +1,4 @@
-export type DocumentType = 'markdown' | 'text' | 'json' | 'pdf' | 'spreadsheet' | 'image';
+export type DocumentType = 'markdown' | 'text' | 'json' | 'pdf' | 'spreadsheet' | 'image' | 'html';
 
 export interface DocumentVersion {
   id: string;
