@@ -15,7 +15,11 @@ import {
   Layers,
   ArrowRight,
   Play,
-  Check
+  Check,
+  Video,
+  Code,
+  Archive,
+  Binary
 } from 'lucide-react';
 import { Document, Shelf } from '../types';
 
@@ -61,9 +65,19 @@ export default function DocumentCard({
       case 'json':
         return <FileJson className="h-5 w-5 text-amber-500" />;
       case 'pdf':
-        return <FileText className="h-5 w-5 text-rose-500" />;
+        return <FileText className="h-5 w-5 text-rose-550" />;
+      case 'docs':
+        return <FileText className="h-5 w-5 text-blue-500" />;
       case 'spreadsheet':
         return <FileSpreadsheet className="h-5 w-5 text-emerald-500" />;
+      case 'video':
+        return <Video className="h-5 w-5 text-rose-550" />;
+      case 'code':
+        return <Code className="h-5 w-5 text-teal-600" />;
+      case 'zip':
+        return <Archive className="h-5 w-5 text-amber-600" />;
+      case 'other':
+        return <Binary className="h-5 w-5 text-slate-500" />;
       default:
         return <FileText className="h-5 w-5 text-teal-500" />;
     }
@@ -76,7 +90,12 @@ export default function DocumentCard({
       case 'image': return 'bg-purple-50/70 text-purple-700 border-purple-100';
       case 'json': return 'bg-amber-50/70 text-amber-700 border-amber-100';
       case 'pdf': return 'bg-rose-50/70 text-rose-700 border-rose-100';
+      case 'docs': return 'bg-blue-50/70 text-blue-700 border-blue-100';
       case 'spreadsheet': return 'bg-emerald-50/70 text-emerald-700 border-emerald-100';
+      case 'video': return 'bg-pink-50/70 text-pink-700 border-pink-100';
+      case 'code': return 'bg-teal-50/70 text-teal-700 border-teal-100';
+      case 'zip': return 'bg-amber-50/70 text-amber-700 border-amber-100';
+      case 'other': return 'bg-slate-150/70 text-slate-700 border-slate-200';
       default: return 'bg-teal-50/70 text-teal-700 border-teal-100';
     }
   };
@@ -419,16 +438,19 @@ export default function DocumentCard({
                     const blob = new Blob([document.content], { type: 'text/plain;charset=utf-8' });
                     url = URL.createObjectURL(blob);
                   }
+                } else if (document.type === 'video' && document.content.startsWith('data:video')) {
+                  url = document.content;
+                  ext = document.content.split(';')[0].split('/')[1] || 'mp4';
                 } else {
                   const blob = new Blob([document.content], { type: 'text/plain;charset=utf-8' });
                   url = URL.createObjectURL(blob);
-                  ext = document.type === 'json' ? 'json' : document.type === 'markdown' ? 'md' : document.type === 'html' ? 'html' : document.type === 'spreadsheet' ? 'csv' : 'txt';
+                  ext = document.type === 'json' ? 'json' : document.type === 'markdown' ? 'md' : document.type === 'html' ? 'html' : document.type === 'spreadsheet' ? 'csv' : document.type === 'video' ? 'mp4' : document.type === 'code' ? 'ts' : document.type === 'zip' ? 'zip' : document.type === 'docs' ? 'docx' : document.type === 'pdf' ? 'pdf' : document.type === 'other' ? 'bin' : 'txt';
                 }
                 const link = window.document.createElement('a');
                 link.href = url;
                 link.download = `${document.title.replace(/\s+/g, '_')}.${ext}`;
                 link.click();
-                if (!url.startsWith('data:image')) {
+                if (!url.startsWith('data:image') && !url.startsWith('data:video')) {
                   URL.revokeObjectURL(url);
                 }
               }}

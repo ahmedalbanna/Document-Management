@@ -28,6 +28,12 @@ import ImageEditor from './ImageEditor';
 import HtmlEditor from './HtmlEditor';
 import CsvEditor from './CsvEditor';
 import MarkdownEditor from './MarkdownEditor';
+import VideoEditor from './VideoEditor';
+import CodeEditor from './CodeEditor';
+import ZipEditor from './ZipEditor';
+import OtherEditor from './OtherEditor';
+import DocsEditor from './DocsEditor';
+import PdfEditor from './PdfEditor';
 
 interface DocumentEditorProps {
   document: Document;
@@ -574,7 +580,7 @@ export default function DocumentEditor({
           </div>
 
           <div className="flex items-center gap-2.5">
-            {!['image', 'html', 'spreadsheet', 'markdown'].includes(type) && (
+            {!['image', 'html', 'spreadsheet', 'markdown', 'video', 'code', 'zip', 'other'].includes(type) && (
               <button
                 id="editor-toggle-preview"
                 onClick={() => setPreviewMode(!previewMode)}
@@ -641,6 +647,30 @@ export default function DocumentEditor({
             ) : type === 'markdown' ? (
               <div className="flex-1 p-6 overflow-y-auto">
                 <MarkdownEditor content={content} onChange={(newVal) => { setContent(newVal); setIsSaved(false); }} renderMarkdown={renderMarkdown} title={title} />
+              </div>
+            ) : type === 'video' ? (
+              <div className="flex-1 p-6 overflow-y-auto">
+                <VideoEditor content={content} onChange={(newVal) => { setContent(newVal); setIsSaved(false); }} title={title} />
+              </div>
+            ) : type === 'code' ? (
+              <div className="flex-1 p-6 overflow-y-auto">
+                <CodeEditor content={content} onChange={(newVal) => { setContent(newVal); setIsSaved(false); }} title={title} />
+              </div>
+            ) : type === 'zip' ? (
+              <div className="flex-1 p-6 overflow-y-auto">
+                <ZipEditor content={content} onChange={(newVal) => { setContent(newVal); setIsSaved(false); }} title={title} />
+              </div>
+            ) : type === 'other' ? (
+              <div className="flex-1 p-6 overflow-y-auto">
+                <OtherEditor content={content} onChange={(newVal) => { setContent(newVal); setIsSaved(false); }} title={title} />
+              </div>
+            ) : type === 'docs' ? (
+              <div className="flex-1 p-6 overflow-y-auto">
+                <DocsEditor content={content} onChange={(newVal) => { setContent(newVal); setIsSaved(false); }} title={title} />
+              </div>
+            ) : type === 'pdf' ? (
+              <div className="flex-1 p-6 overflow-y-auto">
+                <PdfEditor content={content} onChange={(newVal) => { setContent(newVal); setIsSaved(false); }} title={title} />
               </div>
             ) : (
               <div className="flex-1 flex overflow-hidden divide-x divide-gray-100 w-full">
@@ -831,11 +861,16 @@ export default function DocumentEditor({
                     >
                       <option value="markdown">Markdown (.md)</option>
                       <option value="text">Plain Text (.txt)</option>
+                      <option value="docs">Rich Document (.docx/.doc)</option>
                       <option value="json">Structured JSON (.json)</option>
                       <option value="html">HTML Layout (.html)</option>
                       <option value="image">PNG Image (.png)</option>
                       <option value="pdf">Secured Doc (.pdf)</option>
                       <option value="spreadsheet">Parity Sheet (.csv)</option>
+                      <option value="video">MP4 Video (.mp4)</option>
+                      <option value="code">Source Code (.ts/.js/.py/.rs)</option>
+                      <option value="zip">ZIP Archive (.zip)</option>
+                      <option value="other">System Binary (.bin/.exe)</option>
                     </select>
                   </div>
                 </div>

@@ -42,21 +42,33 @@ export default function UploadModal({
       type = 'spreadsheet';
     } else if (extension === 'pdf') {
       type = 'pdf';
+    } else if (['doc', 'docx', 'rtf'].includes(extension || '')) {
+      type = 'docs';
     } else if (['png', 'jpeg', 'jpg', 'webp', 'gif'].includes(extension || '')) {
       type = 'image';
+    } else if (['mp4', 'webm', 'ogg', 'mov', 'avi'].includes(extension || '')) {
+      type = 'video';
+    } else if (['js', 'jsx', 'ts', 'tsx', 'py', 'rs', 'go', 'cpp', 'c', 'h', 'java', 'css', 'sh', 'sql'].includes(extension || '')) {
+      type = 'code';
+    } else if (['zip', 'rar', 'tar', 'gz', '7z'].includes(extension || '')) {
+      type = 'zip';
+    } else if (['bin', 'exe', 'dll', 'sys', 'dat', 'db'].includes(extension || '')) {
+      type = 'other';
+    } else {
+      type = 'other';
     }
 
     const reader = new FileReader();
     
-    // For images, we can extract details or read as dataURL; for text files we read as Text
-    if (type === 'image') {
+    // For images and videos, read as dataURL; for text/other files read as text
+    if (type === 'image' || type === 'video') {
       reader.onload = (e) => {
         const result = e.target?.result as string;
         setParsedFile({
           name: file.name.replace(/\.[^/.]+$/, ""), // remove extension
-          content: `![Uploaded Image](${result})`,
+          content: type === 'image' ? `![Uploaded Image](${result})` : result,
           size: file.size,
-          type: 'image',
+          type,
         });
       };
       reader.readAsDataURL(file);
@@ -195,7 +207,7 @@ export default function UploadModal({
                 ref={fileInputRef}
                 type="file"
                 className="hidden"
-                accept=".txt,.md,.json,.csv,.xml,.png,.jpg,.jpeg,.webp,.html,.htm"
+                accept=".txt,.md,.json,.csv,.xml,.png,.jpg,.jpeg,.webp,.html,.htm,.mp4,.webm,.zip,.rar,.ts,.js,.py,.rs,.cpp,.go,.bin,.exe,.doc,.docx,.pdf"
                 onChange={handleFileChange}
               />
               <div className="p-3 bg-gray-50 text-gray-400 group-hover:text-indigo-600 rounded-full border border-gray-100">
@@ -203,7 +215,7 @@ export default function UploadModal({
               </div>
               <div className="flex flex-col gap-1">
                 <span className="text-xs font-semibold">Drag & drop files here, or click to browse</span>
-                <span className="text-[10px] text-gray-450">Supports standard formats (.txt, .md, .json, .csv, .html, .png) up to 2 MB</span>
+                <span className="text-[10px] text-gray-450">Supports standard formats (.txt, .md, .json, .csv, .html, .png, .pdf, .docx, .mp4, .zip, .ts/.py/.rs) up to 2 MB</span>
               </div>
             </div>
           ) : (
