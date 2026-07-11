@@ -35,6 +35,7 @@ import UploadModal from './components/UploadModal';
 import MergeModal from './components/MergeModal';
 import ShareModal from './components/ShareModal';
 import { DocumentSearchIndex } from './utils/searchIndex';
+import RagChat from './components/RagChat';
 
 export default function App() {
   // --- Active Persona Session State ---
@@ -46,7 +47,7 @@ export default function App() {
   const [activities, setActivities] = useState<ActivityLog[]>([]);
 
   // --- Workspace Filters & Navigation ---
-  const [activeTab, setActiveTab] = useState<'shelves' | 'all' | 'favorites' | 'trash'>('shelves');
+  const [activeTab, setActiveTab] = useState<'shelves' | 'all' | 'favorites' | 'trash' | 'chat'>('shelves');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
 
@@ -929,6 +930,21 @@ Enter standard paragraphs or lists...`,
           </button>
 
           <button
+            id="tab-chat"
+            onClick={() => { setActiveTab('chat'); setSelectedTag(null); }}
+            className={`w-full text-left font-medium text-xs px-3 py-2 rounded-xl transition-all flex items-center justify-between cursor-pointer ${
+              activeTab === 'chat' 
+                ? 'bg-indigo-50 text-indigo-700 font-semibold' 
+                : 'text-gray-500 hover:bg-gray-50 hover:text-gray-800'
+            }`}
+          >
+            <span className="flex items-center gap-2">
+              <Sparkles className="h-4 w-4 text-indigo-500 fill-current animate-pulse" /> Workspace Assistant (RAG)
+            </span>
+            <span className="font-mono text-[9px] bg-indigo-100 text-indigo-800 font-bold border border-indigo-200 rounded px-1 py-0.2">AI</span>
+          </button>
+
+          <button
             id="tab-trash"
             onClick={() => { setActiveTab('trash'); setSelectedTag(null); }}
             className={`w-full text-left font-medium text-xs px-3 py-2 rounded-xl transition-all flex items-center justify-between cursor-pointer ${
@@ -1030,10 +1046,12 @@ Enter standard paragraphs or lists...`,
               <h2 className="text-xl font-bold text-gray-900 tracking-tight flex items-center gap-2 uppercase">
                 {activeTab === 'shelves' ? 'Categorical Shelves' : 
                  activeTab === 'all' ? 'All Workspace Logs' : 
-                 activeTab === 'favorites' ? 'Starred Log entries' : 'Trash Collection'}
+                 activeTab === 'favorites' ? 'Starred Log entries' : 
+                 activeTab === 'chat' ? 'Workspace Assistant' : 'Trash Collection'}
               </h2>
               <p className="text-xs text-gray-400 mt-0.5">
                 {activeTab === 'shelves' ? 'Categorized rows according to physics equations and balance release cycles' : 
+                 activeTab === 'chat' ? 'Discuss, summarize, or query document collections locally with Gemini' :
                  `Secure file lists holding ${filteredDocs.length} elements.`}
               </p>
             </div>
@@ -1112,7 +1130,14 @@ Enter standard paragraphs or lists...`,
 
         {/* 4. MAIN ACTION SPACE */}
         <div id="workspace-action-space" className="flex-1 flex flex-col">
-          {activeTab === 'shelves' && !selectedTag && searchQuery === '' ? (
+          {activeTab === 'chat' ? (
+            <RagChat
+              documents={documents}
+              shelves={shelves}
+              onOpenDoc={handleOpenDoc}
+              currentUserEmail={currentUserEmail}
+            />
+          ) : activeTab === 'shelves' && !selectedTag && searchQuery === '' ? (
             // GRID SHELVES LIST (Default View)
             <div className="flex flex-col">
               {shelves.map((shelf) => {
