@@ -40,6 +40,48 @@ export default function VideoEditor({ content, onChange, title }: VideoEditorPro
   const [isMuted, setIsMuted] = useState<boolean>(false);
   const [loopEnabled, setLoopEnabled] = useState<boolean>(false);
 
+  // AI Summarization states
+  const [activeTab, setActiveTab] = useState<'markers' | 'ai_summary'>('markers');
+  const [isSummarizing, setIsSummarizing] = useState<boolean>(false);
+  const [summaryText, setSummaryText] = useState<string>('');
+  const [summaryError, setSummaryError] = useState<string>('');
+
+  const handleSummarizeVideo = async () => {
+    setIsSummarizing(true);
+    setSummaryError('');
+    setSummaryText('');
+    
+    try {
+      const response = await fetch('/api/gemini/summarize-video', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          videoUrl,
+          title,
+          markers
+        }),
+      });
+      
+      if (!response.ok) {
+        throw new Error('Video summarization failed.');
+      }
+      
+      const data = await response.json();
+      if (data.error) {
+        throw new Error(data.error);
+      }
+      
+      setSummaryText(data.summary || 'No summary was generated.');
+    } catch (err: any) {
+      console.error(err);
+      setSummaryError(err.message || 'An error occurred during video analysis.');
+    } finally {
+      setIsSummarizing(false);
+    }
+  };
+
   // Video annotations/markers
   const [markers, setMarkers] = useState<VideoMarker[]>([]);
   const [newNote, setNewNote] = useState<string>('');
@@ -312,73 +354,158 @@ export default function VideoEditor({ content, onChange, title }: VideoEditorPro
       </div>
 
       {/* RIGHT: Video markers/annotations panel */}
-      <div className="w-full xl:w-72 bg-gray-50 border border-gray-150 rounded-2xl p-4.5 flex flex-col justify-between shrink-0 h-full">
+      <div className="w-full xl:w-72 bg-gray-50 border border-gray-150 rounded-2xl p-4 flex flex-col justify-between shrink-0 h-[500px]">
         
-        {/* Timestamp notes list */}
-        <div className="flex flex-col gap-3">
-          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider font-mono flex items-center gap-1">
-            <Bookmark className="h-3.5 w-3.5 text-indigo-550" /> Video Timestamp Marks
-          </span>
-
-          {/* Insertion form */}
-          <div className="flex gap-1.5 mt-1.5">
-            <input
-              type="text"
-              placeholder="Add annotation at current time..."
-              value={newNote}
-              onChange={(e) => setNewNote(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') handleAddMarker();
-              }}
-              className="flex-grow bg-white border border-gray-200 rounded-xl px-3 py-1.5 text-xs focus:ring-1 focus:ring-indigo-550 focus:outline-none"
-            />
+        <div className="flex flex-col gap-3 h-full overflow-hidden">
+          {/* Navigation Tab Header */}
+          <div className="flex bg-gray-200/55 p-1 rounded-xl gap-0.5 border border-gray-200/20 text-center shrink-0 mb-1">
             <button
               type="button"
-              onClick={handleAddMarker}
-              className="p-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl cursor-pointer shadow-sm transition-all flex items-center justify-center shrink-0"
+              onClick={() => setActiveTab('markers')}
+              className={`flex-1 py-1 text-[11px] font-bold rounded-lg transition-all flex items-center justify-center gap-0.5 cursor-pointer ${
+                activeTab === 'markers' ? 'bg-white text-gray-900 shadow-xs' : 'text-gray-500 hover:text-gray-850'
+              }`}
             >
-              <Plus className="h-4 w-4" />
+              <Bookmark className="h-3 w-3" /> Marks
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('ai_summary')}
+              className={`flex-1 py-1 text-[11px] font-bold rounded-lg transition-all flex items-center justify-center gap-0.5 cursor-pointer ${
+                activeTab === 'ai_summary' ? 'bg-white text-gray-900 shadow-xs' : 'text-gray-500 hover:text-gray-850'
+              }`}
+            >
+              <VideoIcon className="h-3 w-3 text-indigo-550" /> AI Summary
             </button>
           </div>
 
-          {/* Markers List */}
-          <div className="flex flex-col gap-2 overflow-y-auto max-h-[30vh] xl:max-h-[45vh] mt-2 pr-0.5 [scrollbar-width:thin]">
-            {markers.length > 0 ? (
-              markers.map((marker) => (
-                <div
-                  key={marker.id}
-                  className="p-2 bg-white border border-gray-150 hover:border-indigo-150 rounded-xl flex items-start gap-2.5 transition-all text-left group"
-                >
-                  <button
-                    type="button"
-                    onClick={() => handleSeekToMarker(marker.timestamp)}
-                    className="mt-0.5 p-1 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 rounded-lg text-[9px] font-mono font-bold flex items-center gap-0.5 shrink-0 transition-colors"
-                    title="Seek to time"
-                  >
-                    <Clock className="h-2.5 w-2.5" />
-                    {formatTime(marker.timestamp)}
-                  </button>
-                  
-                  <div className="flex-grow min-w-0 flex flex-col justify-center">
-                    <p className="text-xs text-gray-700 leading-normal break-words">{marker.note}</p>
-                  </div>
+          {activeTab === 'markers' ? (
+            <div className="flex flex-col gap-2.5 flex-grow overflow-hidden">
+              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider font-mono flex items-center gap-1 shrink-0">
+                <Bookmark className="h-3.5 w-3.5 text-indigo-550" /> Video Timestamp Marks
+              </span>
 
+              {/* Insertion form */}
+              <div className="flex gap-1.5 shrink-0">
+                <input
+                  type="text"
+                  placeholder="Add annotation..."
+                  value={newNote}
+                  onChange={(e) => setNewNote(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleAddMarker();
+                  }}
+                  className="flex-grow bg-white border border-gray-200 rounded-xl px-3 py-1.5 text-xs focus:ring-1 focus:ring-indigo-550 focus:outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={handleAddMarker}
+                  className="p-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl cursor-pointer shadow-sm transition-all flex items-center justify-center shrink-0"
+                >
+                  <Plus className="h-4 w-4" />
+                </button>
+              </div>
+
+              {/* Markers List */}
+              <div className="flex-grow overflow-y-auto pr-0.5 [scrollbar-width:thin]">
+                {markers.length > 0 ? (
+                  markers.map((marker) => (
+                    <div
+                      key={marker.id}
+                      className="p-2 bg-white border border-gray-150 hover:border-indigo-150 rounded-xl flex items-start gap-2.5 transition-all text-left group mb-2"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => handleSeekToMarker(marker.timestamp)}
+                        className="mt-0.5 p-1 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 rounded-lg text-[9px] font-mono font-bold flex items-center gap-0.5 shrink-0 transition-colors"
+                        title="Seek to time"
+                      >
+                        <Clock className="h-2.5 w-2.5" />
+                        {formatTime(marker.timestamp)}
+                      </button>
+                      
+                      <div className="flex-grow min-w-0 flex flex-col justify-center">
+                        <p className="text-xs text-gray-700 leading-normal break-words">{marker.note}</p>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteMarker(marker.id)}
+                        className="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all cursor-pointer shrink-0"
+                        title="Delete annotation"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ))
+                ) : (
+                  <div className="py-8 text-center text-gray-400 italic text-xs border border-dashed border-gray-200 rounded-xl bg-white/50">
+                    No annotations added yet.
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-2 flex-grow overflow-hidden">
+              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider font-mono flex items-center gap-1 shrink-0">
+                <VideoIcon className="h-3.5 w-3.5 text-indigo-550" /> Gemini Video Summarizer
+              </span>
+              
+              {!summaryText ? (
+                <div className="flex-grow flex flex-col items-center justify-center text-center p-3.5 bg-white border border-dashed border-gray-250 rounded-2xl select-none my-1">
+                  <VideoIcon className="h-7 w-7 text-indigo-300 stroke-[1.5] mb-2 animate-bounce animate-pulse" style={{ animationDuration: '3s' }} />
+                  <span className="text-xs font-bold text-gray-600 mb-1">Summarize with AI</span>
+                  <p className="text-[10px] text-gray-400 leading-normal max-w-[180px] mb-4">
+                    Generate an analytical engineering report & timeline snapshots of this stream using Gemini.
+                  </p>
                   <button
                     type="button"
-                    onClick={() => handleDeleteMarker(marker.id)}
-                    className="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all cursor-pointer shrink-0"
-                    title="Delete annotation"
+                    onClick={handleSummarizeVideo}
+                    disabled={isSummarizing}
+                    className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl cursor-pointer shadow flex items-center gap-1.5 transition-all disabled:bg-indigo-300 animate-pulse"
                   >
-                    <Trash2 className="h-3 w-3" />
+                    {isSummarizing ? (
+                      <span className="h-3.5 w-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      <Bookmark className="h-3.5 w-3.5 fill-current text-white/95" />
+                    )}
+                    <span>{isSummarizing ? 'Analyzing...' : 'Generate Summary'}</span>
                   </button>
                 </div>
-              ))
-            ) : (
-              <div className="py-8 text-center text-gray-400 italic text-xs border border-dashed border-gray-200 rounded-xl bg-white/50">
-                No annotations added yet.
-              </div>
-            )}
-          </div>
+              ) : (
+                <div className="flex-grow flex flex-col overflow-hidden gap-1.5">
+                  <div className="flex justify-between items-center shrink-0">
+                    <span className="text-[9px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded">Analysis Complete</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(summaryText);
+                        alert('Summary copied to clipboard!');
+                      }}
+                      className="text-[10px] text-indigo-600 font-bold hover:underline cursor-pointer lowercase"
+                    >
+                      copy
+                    </button>
+                  </div>
+                  <textarea
+                    readOnly
+                    value={summaryText}
+                    className="flex-grow w-full bg-white border border-gray-200 rounded-xl p-2.5 text-xs font-mono text-gray-700 leading-relaxed focus:outline-none resize-none select-text [scrollbar-width:thin] overflow-y-auto"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setSummaryText('')}
+                    className="w-full text-center text-[10px] text-gray-400 hover:text-indigo-600 font-bold cursor-pointer transition-colors py-0.5 shrink-0"
+                  >
+                    Re-run analysis
+                  </button>
+                </div>
+              )}
+              {summaryError && (
+                <p className="text-[10px] text-red-500 font-semibold leading-normal shrink-0">{summaryError}</p>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Simulated visual spectrum analyzer */}

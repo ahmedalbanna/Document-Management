@@ -72,6 +72,8 @@ export default function DocumentEditor({
   const [previewMode, setPreviewMode] = useState<boolean>(false);
   const [isSaved, setIsSaved] = useState<boolean>(true);
   const [showSimulator, setShowSimulator] = useState<boolean>(initialShowSimulator);
+  const [isConverting, setIsConverting] = useState<boolean>(false);
+  const [showConvertMenu, setShowConvertMenu] = useState<boolean>(false);
 
   const getDocumentUserRole = (): 'owner' | 'editor' | 'viewer' | 'none' => {
     const userEmail = currentUserEmail || 'ahmedalbanna966@gmail.com';
@@ -261,6 +263,46 @@ export default function DocumentEditor({
     setIsSaved(true);
     setShowSaveConfirm(false);
     setChangeDescription('');
+  };
+
+  const handleMagicConvert = async (targetType: string) => {
+    setShowConvertMenu(false);
+    setIsConverting(true);
+    
+    try {
+      const response = await fetch('/api/gemini/convert-document', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          title,
+          content,
+          currentType: type,
+          targetType,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Magic format conversion failed.');
+      }
+
+      const data = await response.json();
+      if (data.error) {
+        throw new Error(data.error);
+      }
+
+      setContent(data.content);
+      setType(targetType as any);
+      setIsSaved(false);
+      
+      alert(`Successfully converted document to ${targetType.toUpperCase()}! Your workspace has been updated. Make sure to commit or save your changes.`);
+    } catch (err: any) {
+      console.error(err);
+      alert(err.message || 'An error occurred during Magic conversion.');
+    } finally {
+      setIsConverting(false);
+    }
   };
 
   const handleAddTag = (e: React.FormEvent) => {
@@ -684,6 +726,61 @@ export default function DocumentEditor({
                   <span className="h-1.5 w-1.5 rounded-full bg-indigo-600 animate-pulse" />
                 )}
               </button>
+            )}
+
+            {/* Magic Convert trigger */}
+            {!isReadOnly && ['pdf', 'markdown', 'text', 'docs', 'html'].includes(type) && (
+              <div className="relative" id="magic-convert-container">
+                <button
+                  id="editor-magic-convert-btn"
+                  onClick={() => setShowConvertMenu(!showConvertMenu)}
+                  disabled={isConverting}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-semibold cursor-pointer transition-all ${
+                    showConvertMenu
+                      ? 'bg-indigo-50 border-indigo-200 text-indigo-750 shadow-xs'
+                      : 'bg-white border-gray-200 text-gray-600 hover:text-indigo-650 hover:border-indigo-100 shadow-xs'
+                  }`}
+                >
+                  <Sparkles className={`h-3.5 w-3.5 text-indigo-550 ${isConverting ? 'animate-spin' : ''}`} />
+                  <span>{isConverting ? 'Converting...' : 'Magic Convert'}</span>
+                </button>
+                
+                <AnimatePresence>
+                  {showConvertMenu && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 10 }}
+                      className="absolute right-0 mt-2 bg-white border border-gray-200 rounded-2xl shadow-xl p-3 z-40 w-52 flex flex-col gap-1 select-none"
+                    >
+                      <div className="text-[10px] uppercase font-bold text-gray-400 tracking-wider mb-1 flex items-center gap-1 border-b border-gray-100 pb-1.5 shrink-0">
+                        <Sparkles className="h-3 w-3 text-indigo-550 fill-current" />
+                        <span>Convert with AI</span>
+                      </div>
+                      
+                      {[
+                        { val: 'markdown', label: 'Markdown (.md)', icon: '📝' },
+                        { val: 'docs', label: 'Word Doc (.docx)', icon: '📄' },
+                        { val: 'html', label: 'Tailwind HTML (.html)', icon: '🌐' },
+                        { val: 'pdf', label: 'Secured PDF (.pdf)', icon: '🔒' }
+                      ]
+                        .filter(f => f.val !== type)
+                        .map(target => (
+                          <button
+                            key={target.val}
+                            type="button"
+                            onClick={() => handleMagicConvert(target.val)}
+                            className="w-full text-left text-xs px-2.5 py-1.5 rounded-xl text-gray-700 hover:bg-indigo-50 hover:text-indigo-800 transition-colors cursor-pointer font-medium flex items-center gap-2"
+                          >
+                            <span>{target.icon}</span>
+                            <span>{target.label}</span>
+                          </button>
+                        ))
+                      }
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
             )}
 
             {isReadOnly ? (

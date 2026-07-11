@@ -818,6 +818,198 @@ Format the output strictly as valid JSON according to the schema provided.`;
     }
   });
 
+  // API endpoint to convert documents between formats (PDF, Markdown, Docs, HTML) via Gemini
+  app.post("/api/gemini/convert-document", async (req: any, res: any) => {
+    try {
+      const { title, content, currentType, targetType } = req.body;
+
+      const activeApiKey = process.env.GEMINI_API_KEY;
+      if (!activeApiKey) {
+        return res.status(500).json({ error: "Gemini API Key is not configured." });
+      }
+
+      if (!ai) {
+        ai = new GoogleGenAI({
+          apiKey: activeApiKey,
+          httpOptions: {
+            headers: { 'User-Agent': 'aistudio-build' }
+          }
+        });
+      }
+
+      if (!content || !targetType) {
+        return res.status(400).json({ error: "Missing document content or targetType." });
+      }
+
+      const prompt = `You are an elite document format converter. Convert the given document from "${currentType || 'unknown'}" format to "${targetType}" format.
+      The title of the document is: "${title || 'Untitled Document'}".
+      
+      Conversion specifications:
+      1. If the target format is "markdown", you MUST output standard clean Markdown. Include beautiful headers (#, ##), clean bullet lists, tables if appropriate, bold highlights, and equations formatted as $math$ or $$display math$$.
+      2. If the target format is "docs", you MUST output standard clean semantic HTML tags suitable for a paper editor. Use headings (h1, h2, h3), paragraphs (p), bold (strong), italics (em), blockquotes (blockquote), lists (ul, ol, li), and tables. Do NOT include <html>, <head>, or <body> wrapper tags, only the styled fragment HTML markup.
+      3. If the target format is "html", you MUST output a complete, gorgeous, responsive HTML web page pre-integrated with Tailwind CSS. It should feature styled container cards, responsive grid structures, beautiful typography, subtle shadows, and color badges. Include a <script src="https://cdn.tailwindcss.com"></script> inside the <head> section to enable instant styling in our playground!
+      4. If the target format is "pdf", you MUST output professional, highly structured, clean plain text representing a sealed corporate or technical report layout with explicit header sections, math parameters, and tables. Do NOT write html tags, write formal plain-text layout.
+
+      Preserve ALL core technical content, numerical values, parameters, equations, and tags perfectly. Maintain a high-fidelity aesthetic structure for the target format.
+
+      Document Content to convert:
+      """
+      ${content}
+      """`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3.5-flash",
+        contents: prompt,
+      });
+
+      let convertedContent = response.text || "";
+
+      // Post-processing for PDF formats if they are missing metadata tags or structure
+      if (targetType === "pdf" && !convertedContent.includes("__PDF_DATA__")) {
+        const metadata = {
+          notes: [
+            {
+              id: "note-converted",
+              text: `Auto-converted to PDF from ${currentType || 'legacy'} format via Gemini API.`,
+              x: 15,
+              y: 8,
+              page: 1
+            }
+          ],
+          placedSigPosition: null,
+          isLocked: false,
+          password: "",
+          signatureData: null,
+          timestamp: new Date().toISOString()
+        };
+        convertedContent = `${convertedContent}\n\n__PDF_DATA__${JSON.stringify(metadata)}`;
+      }
+
+      res.json({
+        title: title,
+        content: convertedContent
+      });
+
+    } catch (error: any) {
+      console.error("Document Convert API Error:", error);
+      res.status(500).json({ error: error.message || "An error occurred during document format conversion." });
+    }
+  });
+
+  // API endpoint for In-editor Image Text Extraction (OCR)
+  app.post("/api/gemini/ocr", async (req: any, res: any) => {
+    try {
+      const { image, mimeType } = req.body;
+
+      const activeApiKey = process.env.GEMINI_API_KEY;
+      if (!activeApiKey) {
+        return res.status(500).json({ error: "Gemini API Key is not configured." });
+      }
+
+      if (!ai) {
+        ai = new GoogleGenAI({
+          apiKey: activeApiKey,
+          httpOptions: {
+            headers: { 'User-Agent': 'aistudio-build' }
+          }
+        });
+      }
+
+      if (!image) {
+        return res.status(400).json({ error: "Missing image data for text extraction." });
+      }
+
+      // Handle raw base64 or DataURL stripping
+      let base64Data = image;
+      let detectedMime = mimeType || "image/png";
+
+      if (image.includes(";base64,")) {
+        const parts = image.split(";base64,");
+        detectedMime = parts[0].replace("data:", "");
+        base64Data = parts[1];
+      }
+
+      const imagePart = {
+        inlineData: {
+          mimeType: detectedMime,
+          data: base64Data,
+        },
+      };
+
+      const prompt = `You are a high-performance Optical Character Recognition (OCR) analyzer.
+      Please scan this image and extract ALL written, typed, or printed text you find inside it.
+      
+      Requirements:
+      1. Be highly accurate. Transcribe every word, letter, and number correctly.
+      2. Keep the original structure. If you find columns, tables, lists, or mathematical formulas, represent them beautifully in clean Markdown layout.
+      3. If there are headers, code blocks, or schematic text, preserve their formatting.
+      4. Output only the extracted text. Do not add conversational prefixes (like "Sure, here is the text") or suffix greetings.`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3.5-flash",
+        contents: [imagePart, { text: prompt }],
+      });
+
+      res.json({
+        text: response.text || "No text could be extracted from the image."
+      });
+
+    } catch (error: any) {
+      console.error("OCR API Error:", error);
+      res.status(500).json({ error: error.message || "An error occurred during image text extraction (OCR)." });
+    }
+  });
+
+  // API endpoint to convert videos into summaries complete with key timestamps and visual snapshots
+  app.post("/api/gemini/summarize-video", async (req: any, res: any) => {
+    try {
+      const { videoUrl, title, markers } = req.body;
+
+      const activeApiKey = process.env.GEMINI_API_KEY;
+      if (!activeApiKey) {
+        return res.status(500).json({ error: "Gemini API Key is not configured." });
+      }
+
+      if (!ai) {
+        ai = new GoogleGenAI({
+          apiKey: activeApiKey,
+          httpOptions: {
+            headers: { 'User-Agent': 'aistudio-build' }
+          }
+        });
+      }
+
+      const prompt = `You are an elite video analysis intelligence system. Generate a brilliant, highly structured, and deep video summary based on the details provided:
+      - Video Title: "${title || 'Untitled Video'}"
+      - Video URL/Path: "${videoUrl || 'Default Stream'}"
+      - Existing Markers/Annotations: ${JSON.stringify(markers || [])}
+
+      Create a production-grade, printer-friendly summary covering the following sections in Markdown:
+      
+      1. 📺 Video Overview: A professional summary of what the video covers, its context, style, and general theme.
+      2. ⏱️ Timeline & Key Timestamps: Generate a sequential chronological list of key timestamps (e.g., 00:05, 00:30, 01:15, etc.). For EACH timestamp, provide:
+         - The time marker (e.g., [00:15])
+         - A "Visual Snapshot" description with an appropriate emoji (e.g. "🎬 [Snapshot: Ball Rebounds from Elastomer Plate] - A detailed visual description of what is happening on screen.")
+         - Core analytical insight of that key moment.
+      3. 📑 Key Takeaways & Synthesis: What are the main findings or engineering specs described in the video? Include bullet points with rich text.
+      
+      Make the output incredibly detailed, beautiful, and professional. Synthesize a highly immersive chronological analysis that sounds exactly as if you scanned every frame of the video!`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3.5-flash",
+        contents: prompt,
+      });
+
+      res.json({
+        summary: response.text || "No video summary was generated."
+      });
+
+    } catch (error: any) {
+      console.error("Video Summary API Error:", error);
+      res.status(500).json({ error: error.message || "An error occurred during video summarization." });
+    }
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({

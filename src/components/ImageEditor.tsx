@@ -41,8 +41,53 @@ const PRESET_IMAGES = [
 
 export default function ImageEditor({ content, onChange, title }: ImageEditorProps) {
   const [imageSrc, setImageSrc] = useState<string>('');
-  const [tool, setTool] = useState<'draw' | 'filters' | 'presets'>('draw');
+  const [tool, setTool] = useState<'draw' | 'filters' | 'presets' | 'ocr'>('draw');
   
+  // OCR states
+  const [isOcrLoading, setIsOcrLoading] = useState<boolean>(false);
+  const [ocrText, setOcrText] = useState<string>('');
+  const [ocrError, setOcrError] = useState<string>('');
+
+  const handleRunOcr = async () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    
+    setIsOcrLoading(true);
+    setOcrError('');
+    setOcrText('');
+    
+    try {
+      const dataUrl = canvas.toDataURL('image/png');
+      
+      const response = await fetch('/api/gemini/ocr', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          image: dataUrl,
+          mimeType: 'image/png'
+        }),
+      });
+      
+      if (!response.ok) {
+        throw new Error('OCR text extraction failed.');
+      }
+      
+      const data = await response.json();
+      if (data.error) {
+        throw new Error(data.error);
+      }
+      
+      setOcrText(data.text || 'No text detected in the image.');
+    } catch (err: any) {
+      console.error(err);
+      setOcrError(err.message || 'An error occurred during OCR extraction.');
+    } finally {
+      setIsOcrLoading(false);
+    }
+  };
+
   // Brush/Drawing configuration
   const [brushColor, setBrushColor] = useState<string>('#6366f1');
   const [brushSize, setBrushSize] = useState<number>(5);
@@ -341,33 +386,42 @@ export default function ImageEditor({ content, onChange, title }: ImageEditorPro
       <div className="w-full xl:w-72 bg-gray-50 border border-gray-150/80 rounded-2xl p-4.5 flex flex-col shrink-0">
         
         {/* Navigation Tabs */}
-        <div className="flex bg-gray-200/50 p-1 rounded-xl gap-1 mb-4 border border-gray-200/20 text-center shrink-0">
+        <div className="flex bg-gray-200/55 p-1 rounded-xl gap-0.5 mb-4 border border-gray-200/20 text-center shrink-0">
           <button
             type="button"
             onClick={() => setTool('draw')}
-            className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1 cursor-pointer ${
+            className={`flex-1 py-1 px-1 text-[11px] font-bold rounded-lg transition-all flex items-center justify-center gap-0.5 cursor-pointer ${
               tool === 'draw' ? 'bg-white text-gray-900 shadow-xs' : 'text-gray-500 hover:text-gray-850'
             }`}
           >
-            <Paintbrush className="h-3.5 w-3.5" /> Draw
+            <Paintbrush className="h-3 w-3" /> Draw
           </button>
           <button
             type="button"
             onClick={() => setTool('filters')}
-            className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1 cursor-pointer ${
+            className={`flex-1 py-1 px-1 text-[11px] font-bold rounded-lg transition-all flex items-center justify-center gap-0.5 cursor-pointer ${
               tool === 'filters' ? 'bg-white text-gray-900 shadow-xs' : 'text-gray-500 hover:text-gray-850'
             }`}
           >
-            <Sliders className="h-3.5 w-3.5" /> Filters
+            <Sliders className="h-3 w-3" /> Filters
           </button>
           <button
             type="button"
             onClick={() => setTool('presets')}
-            className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1 cursor-pointer ${
+            className={`flex-1 py-1 px-1 text-[11px] font-bold rounded-lg transition-all flex items-center justify-center gap-0.5 cursor-pointer ${
               tool === 'presets' ? 'bg-white text-gray-900 shadow-xs' : 'text-gray-500 hover:text-gray-850'
             }`}
           >
-            <ImageIcon className="h-3.5 w-3.5" /> Presets
+            <ImageIcon className="h-3 w-3" /> Presets
+          </button>
+          <button
+            type="button"
+            onClick={() => setTool('ocr')}
+            className={`flex-1 py-1 px-1 text-[11px] font-bold rounded-lg transition-all flex items-center justify-center gap-0.5 cursor-pointer ${
+              tool === 'ocr' ? 'bg-white text-gray-900 shadow-xs' : 'text-gray-500 hover:text-gray-850'
+            }`}
+          >
+            <Sparkles className="h-3 w-3 text-indigo-650" /> OCR
           </button>
         </div>
 
@@ -551,6 +605,58 @@ export default function ImageEditor({ content, onChange, title }: ImageEditorPro
                   </button>
                 ))}
               </div>
+            </div>
+          )}
+
+          {tool === 'ocr' && (
+            <div className="flex flex-col gap-3">
+              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1">
+                <Sparkles className="h-3 w-3 text-indigo-550" /> Image OCR (Gemini)
+              </span>
+              <p className="text-[10px] text-gray-400 leading-normal">
+                Extract all handwritten, printed, or schematic text from the canvas instantly using Gemini.
+              </p>
+              
+              <button
+                type="button"
+                onClick={handleRunOcr}
+                disabled={isOcrLoading}
+                className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 text-white font-bold text-xs py-2 rounded-xl shadow-sm transition-all flex items-center justify-center gap-1.5 cursor-pointer mt-1"
+              >
+                {isOcrLoading ? (
+                  <span className="h-3.5 w-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <Sparkles className="h-3.5 w-3.5 fill-current" />
+                )}
+                <span>{isOcrLoading ? 'Extracting text...' : 'Extract Image Text'}</span>
+              </button>
+
+              {ocrError && (
+                <p className="text-[10px] text-red-500 font-medium leading-normal mt-1">{ocrError}</p>
+              )}
+
+              {ocrText && (
+                <div className="flex flex-col gap-2 mt-2">
+                  <div className="flex items-center justify-between text-[10px] text-gray-400 font-bold uppercase">
+                    <span>Extracted Text</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(ocrText);
+                        alert('Text copied to clipboard!');
+                      }}
+                      className="text-indigo-600 hover:text-indigo-700 font-semibold lowercase cursor-pointer text-[10px]"
+                    >
+                      copy
+                    </button>
+                  </div>
+                  <textarea
+                    readOnly
+                    value={ocrText}
+                    className="w-full h-40 bg-white border border-gray-200 rounded-xl p-2.5 text-xs font-mono text-gray-700 leading-normal focus:outline-none resize-none select-text [scrollbar-width:thin]"
+                  />
+                </div>
+              )}
             </div>
           )}
 
