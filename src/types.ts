@@ -66,3 +66,19 @@ export interface DashboardStatsData {
   favoriteCount: number;
   archivedCount: number;
 }
+
+export interface ImplicitConnection {
+  sourceId: string;
+  targetId: string;
+  strength: number; // 0 to 1
+  reason: string;
+}
+
+export interface KnowledgeGap {
+  title: string;
+  description: string;
+  suggestedDocType: DocumentType;
+  relatedDocIds: string[];
+  relevance: 'High' | 'Medium' | 'Low';
+}
+
