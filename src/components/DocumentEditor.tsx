@@ -37,6 +37,7 @@ import OtherEditor from './OtherEditor';
 import DocsEditor from './DocsEditor';
 import PdfEditor from './PdfEditor';
 import SmartVoiceSuite from './SmartVoiceSuite';
+import * as Y from 'yjs';
 
 interface DocumentEditorProps {
   document: Document;
@@ -131,8 +132,7 @@ export default function DocumentEditor({
     const insertText = `[[${docTitle}]]`;
     
     const newContent = before + insertText + after;
-    setContent(newContent);
-    setIsSaved(false);
+    handleContentChange(newContent);
     setAutocompleteState({ show: false, query: '', startIndex: -1, endIndex: -1, focusedIndex: 0 });
     
     // Refocus and place cursor after the inserted link
@@ -145,8 +145,7 @@ export default function DocumentEditor({
 
   const handleTextareaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value;
-    setContent(val);
-    setIsSaved(false);
+    handleContentChange(val);
 
     const selectionStart = e.target.selectionStart;
     const textBeforeCursor = val.slice(0, selectionStart);
@@ -200,6 +199,93 @@ export default function DocumentEditor({
     }
   };
 
+  // Real-time Collaboration Suite
+  const [collaborators, setCollaborators] = useState<any[]>([]);
+  const wsRef = React.useRef<WebSocket | null>(null);
+  const yDocRef = React.useRef<Y.Doc | null>(null);
+
+  const getPersonaDetails = (email: string) => {
+    const mapping: Record<string, { name: string; avatar: string; color: string; border: string; bg: string; text: string }> = {
+      'ahmedalbanna966@gmail.com': {
+        name: 'Ahmed Albanna',
+        avatar: '👤',
+        color: '#6366f1',
+        border: 'border-indigo-500',
+        bg: 'bg-indigo-50',
+        text: 'text-indigo-700'
+      },
+      'sarah.dev@company.com': {
+        name: 'Sarah Jenkins',
+        avatar: '💻',
+        color: '#10b981',
+        border: 'border-emerald-500',
+        bg: 'bg-emerald-50',
+        text: 'text-emerald-700'
+      },
+      'alex.manager@company.com': {
+        name: 'Alex Martinez',
+        avatar: '📈',
+        color: '#f59e0b',
+        border: 'border-amber-500',
+        bg: 'bg-amber-50',
+        text: 'text-amber-700'
+      },
+      'guest@external.com': {
+        name: 'Public Guest',
+        avatar: '🌐',
+        color: '#ec4899',
+        border: 'border-pink-500',
+        bg: 'bg-pink-50',
+        text: 'text-pink-700'
+      }
+    };
+    return mapping[email] || {
+      name: email.split('@')[0],
+      avatar: '👥',
+      color: '#6b7280',
+      border: 'border-gray-500',
+      bg: 'bg-gray-50',
+      text: 'text-gray-700'
+    };
+  };
+
+  const sendCursorPosition = (anchor: number, head: number) => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({
+        type: "cursor-moved",
+        docId: document.id,
+        userEmail: currentUserEmail || 'ahmedalbanna966@gmail.com',
+        selection: { anchor, head }
+      }));
+    }
+  };
+
+  const handleContentChange = (newVal: string) => {
+    setContent(newVal);
+    setIsSaved(false);
+
+    const yDoc = yDocRef.current;
+    if (yDoc) {
+      const yText = yDoc.getText("content");
+      if (yText.toString() !== newVal) {
+        yDoc.transact(() => {
+          yText.delete(0, yText.length);
+          yText.insert(0, newVal);
+        }, "local-change");
+      }
+    }
+  };
+
+  const sendMetaUpdate = (updatedMeta: any) => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({
+        type: "meta-updated",
+        docId: document.id,
+        meta: updatedMeta
+      }));
+    }
+  };
+
   useEffect(() => {
     setTitle(document.title);
     setContent(document.content);
@@ -207,7 +293,153 @@ export default function DocumentEditor({
     setCategory(document.category);
     setTags(document.tags);
     setAutocompleteState({ show: false, query: '', startIndex: -1, endIndex: -1, focusedIndex: 0 });
-  }, [document]);
+
+    // 1. Initialize local Yjs Doc
+    const yDoc = new Y.Doc();
+    yDocRef.current = yDoc;
+    const yText = yDoc.getText("content");
+    
+    // Set initial text
+    yText.insert(0, document.content);
+
+    // 2. Establish WebSocket connection
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${wsProtocol}//${window.location.host}`;
+    const ws = new WebSocket(wsUrl);
+    wsRef.current = ws;
+
+    const userEmail = currentUserEmail || 'ahmedalbanna966@gmail.com';
+    const pDetails = getPersonaDetails(userEmail);
+
+    ws.onopen = () => {
+      ws.send(JSON.stringify({
+        type: "join-room",
+        docId: document.id,
+        userEmail: userEmail,
+        userName: pDetails.name,
+        color: pDetails.color,
+        initialTitle: document.title,
+        initialContent: document.content,
+        initialType: document.type,
+        initialTags: document.tags,
+        initialVersions: document.versions || []
+      }));
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+        if (msg.docId !== document.id) return;
+
+        if (msg.type === "yjs-init") {
+          if (msg.update) {
+            Y.applyUpdate(yDoc, new Uint8Array(msg.update), "remote");
+            setContent(yText.toString());
+          }
+          if (msg.meta) {
+            setTitle(msg.meta.title);
+            setType(msg.meta.type);
+            setTags(msg.meta.tags);
+          }
+          if (msg.versions) {
+            document.versions = msg.versions;
+          }
+        }
+
+        else if (msg.type === "yjs-update") {
+          if (msg.update) {
+            Y.applyUpdate(yDoc, new Uint8Array(msg.update), "remote");
+          }
+        }
+
+        else if (msg.type === "presence-list") {
+          const others = msg.participants.filter((p: any) => p.userEmail !== userEmail);
+          setCollaborators(others);
+        }
+
+        else if (msg.type === "user-joined") {
+          if (msg.participant.userEmail !== userEmail) {
+            setCollaborators(prev => {
+              const filtered = prev.filter(p => p.userEmail !== msg.participant.userEmail);
+              return [...filtered, msg.participant];
+            });
+          }
+        }
+
+        else if (msg.type === "user-left") {
+          setCollaborators(prev => prev.filter(p => p.userEmail !== msg.userEmail));
+        }
+
+        else if (msg.type === "cursor-moved") {
+          setCollaborators(prev => prev.map(p => {
+            if (p.userEmail === msg.userEmail) {
+              return { ...p, cursor: msg.selection };
+            }
+            return p;
+          }));
+        }
+
+        else if (msg.type === "meta-updated") {
+          if (msg.meta) {
+            if (msg.meta.title !== undefined) setTitle(msg.meta.title);
+            if (msg.meta.type !== undefined) setType(msg.meta.type);
+            if (msg.meta.tags !== undefined) setTags(msg.meta.tags);
+          }
+        }
+
+        else if (msg.type === "revision-list-updated") {
+          if (msg.versions) {
+            document.versions = msg.versions;
+          }
+        }
+
+      } catch (err) {
+        console.error("Client WS message error:", err);
+      }
+    };
+
+    const onYjsUpdate = () => {
+      const updatedText = yText.toString();
+      setContent(updatedText);
+    };
+    yText.observe(onYjsUpdate);
+
+    const onLocalYjsUpdate = (update: Uint8Array, origin: any) => {
+      if (origin !== "remote" && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          type: "yjs-update",
+          docId: document.id,
+          update: Array.from(update)
+        }));
+      }
+    };
+    yDoc.on("update", onLocalYjsUpdate);
+
+    return () => {
+      yText.unobserve(onYjsUpdate);
+      yDoc.off("update", onLocalYjsUpdate);
+      ws.close();
+      yDoc.destroy();
+    };
+  }, [document.id, currentUserEmail]);
+
+  useEffect(() => {
+    if (title !== document.title) {
+      sendMetaUpdate({ title });
+    }
+  }, [title]);
+
+  useEffect(() => {
+    if (type !== document.type) {
+      sendMetaUpdate({ type });
+    }
+  }, [type]);
+
+  useEffect(() => {
+    if (JSON.stringify(tags) !== JSON.stringify(document.tags)) {
+      sendMetaUpdate({ tags });
+    }
+  }, [tags]);
 
   // Track changes to trigger Save warning
   useEffect(() => {
@@ -251,15 +483,46 @@ export default function DocumentEditor({
   };
 
   const handleConfirmSave = (commitMsg: string) => {
+    const size = new Blob([content]).size;
+    const updatedAt = new Date().toISOString();
+
+    const nextVerNum = (document.versions?.length || 0) + 1;
+    const parentId = document.versions && document.versions.length > 0
+      ? document.versions[document.versions.length - 1].id
+      : null;
+
+    const newVersion = {
+      id: `ver-${Date.now()}`,
+      versionNumber: nextVerNum,
+      parentId,
+      title,
+      content,
+      type,
+      tags,
+      changeSummary: commitMsg.trim() || `Update v${nextVerNum}`,
+      updatedAt,
+      size,
+      author: currentUserEmail || 'ahmedalbanna966@gmail.com'
+    };
+
     onSave(document.id, {
       title,
       content,
       type,
       category,
       tags,
-      size: new Blob([content]).size,
-      updatedAt: new Date().toISOString(),
+      size,
+      updatedAt,
     }, commitMsg.trim() || undefined);
+
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({
+        type: "commit-revision",
+        docId: document.id,
+        version: newVersion
+      }));
+    }
+
     setIsSaved(true);
     setShowSaveConfirm(false);
     setChangeDescription('');
@@ -783,6 +1046,43 @@ export default function DocumentEditor({
               </div>
             )}
 
+            {/* Live Collaborator presence indicator bubbles */}
+            {collaborators.length > 0 && (
+              <div className="flex items-center gap-1.5 border-r border-gray-200/60 pr-3 mr-1 select-none">
+                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest font-mono mr-1 flex items-center gap-1">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  <span>Collab</span>
+                </span>
+                <div className="flex -space-x-2 overflow-hidden">
+                  {collaborators.map((c) => {
+                    const info = getPersonaDetails(c.userEmail);
+                    const isSelectionActive = c.cursor && c.cursor.anchor !== c.cursor.head;
+                    return (
+                      <div
+                        key={c.userEmail}
+                        className={`h-7 w-7 rounded-full border-2 ${info.border} ${info.bg} ${info.text} flex items-center justify-center text-xs font-bold shadow-sm cursor-help relative group transition-all hover:scale-110 hover:z-10`}
+                        title={`${info.name} (${c.userEmail})${c.cursor ? ` - Editing near index ${c.cursor.anchor}${isSelectionActive ? ` (selecting ${Math.abs(c.cursor.head - c.cursor.anchor)} chars)` : ''}` : ' - Viewing document'}`}
+                      >
+                        {info.avatar}
+                        
+                        {/* Interactive tooltip hovering box */}
+                        <div className="absolute top-8 right-1/2 translate-x-1/2 bg-gray-900 text-white text-[10px] px-2 py-1 rounded-md opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none font-sans font-semibold border border-gray-800 shadow-xl">
+                          {info.name}
+                          {c.cursor ? (
+                            <span className="block font-mono text-[8px] text-gray-400 mt-0.5">
+                              Cursor: char {c.cursor.anchor} {isSelectionActive && `(Selection: ${Math.abs(c.cursor.head - c.cursor.anchor)} chars)`}
+                            </span>
+                          ) : (
+                            <span className="block font-mono text-[8px] text-emerald-450 mt-0.5">Viewing</span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             {isReadOnly ? (
               <div className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-amber-50 border border-amber-200/60 text-amber-800 text-xs font-semibold select-none shadow-3xs">
                 <Lock className="h-3.5 w-3.5 shrink-0 text-amber-550" />
@@ -839,43 +1139,43 @@ export default function DocumentEditor({
           <div className="flex-1 flex overflow-hidden split-pane">
             {type === 'image' ? (
               <div className="flex-1 p-6 overflow-y-auto">
-                <ImageEditor content={content} onChange={(newVal) => { if (isReadOnly) return; setContent(newVal); setIsSaved(false); }} title={title} />
+                <ImageEditor content={content} onChange={(newVal) => { if (isReadOnly) return; handleContentChange(newVal); }} title={title} />
               </div>
             ) : type === 'html' ? (
               <div className="flex-1 p-6 overflow-y-auto">
-                <HtmlEditor content={content} onChange={(newVal) => { if (isReadOnly) return; setContent(newVal); setIsSaved(false); }} title={title} />
+                <HtmlEditor content={content} onChange={(newVal) => { if (isReadOnly) return; handleContentChange(newVal); }} title={title} />
               </div>
             ) : type === 'spreadsheet' ? (
               <div className="flex-1 p-6 overflow-y-auto">
-                <CsvEditor content={content} onChange={(newVal) => { if (isReadOnly) return; setContent(newVal); setIsSaved(false); }} title={title} />
+                <CsvEditor content={content} onChange={(newVal) => { if (isReadOnly) return; handleContentChange(newVal); }} title={title} />
               </div>
             ) : type === 'markdown' ? (
               <div className="flex-1 p-6 overflow-y-auto">
-                <MarkdownEditor content={content} onChange={(newVal) => { if (isReadOnly) return; setContent(newVal); setIsSaved(false); }} renderMarkdown={renderMarkdown} title={title} />
+                <MarkdownEditor content={content} onChange={(newVal) => { if (isReadOnly) return; handleContentChange(newVal); }} renderMarkdown={renderMarkdown} title={title} />
               </div>
             ) : type === 'video' ? (
               <div className="flex-1 p-6 overflow-y-auto">
-                <VideoEditor content={content} onChange={(newVal) => { if (isReadOnly) return; setContent(newVal); setIsSaved(false); }} title={title} />
+                <VideoEditor content={content} onChange={(newVal) => { if (isReadOnly) return; handleContentChange(newVal); }} title={title} />
               </div>
             ) : type === 'code' ? (
               <div className="flex-1 p-6 overflow-y-auto">
-                <CodeEditor content={content} onChange={(newVal) => { if (isReadOnly) return; setContent(newVal); setIsSaved(false); }} title={title} />
+                <CodeEditor content={content} onChange={(newVal) => { if (isReadOnly) return; handleContentChange(newVal); }} title={title} />
               </div>
             ) : type === 'zip' ? (
               <div className="flex-1 p-6 overflow-y-auto">
-                <ZipEditor content={content} onChange={(newVal) => { if (isReadOnly) return; setContent(newVal); setIsSaved(false); }} title={title} />
+                <ZipEditor content={content} onChange={(newVal) => { if (isReadOnly) return; handleContentChange(newVal); }} title={title} />
               </div>
             ) : type === 'other' ? (
               <div className="flex-1 p-6 overflow-y-auto">
-                <OtherEditor content={content} onChange={(newVal) => { if (isReadOnly) return; setContent(newVal); setIsSaved(false); }} title={title} />
+                <OtherEditor content={content} onChange={(newVal) => { if (isReadOnly) return; handleContentChange(newVal); }} title={title} />
               </div>
             ) : type === 'docs' ? (
               <div className="flex-1 p-6 overflow-y-auto">
-                <DocsEditor content={content} onChange={(newVal) => { if (isReadOnly) return; setContent(newVal); setIsSaved(false); }} title={title} />
+                <DocsEditor content={content} onChange={(newVal) => { if (isReadOnly) return; handleContentChange(newVal); }} title={title} />
               </div>
             ) : type === 'pdf' ? (
               <div className="flex-1 p-6 overflow-y-auto">
-                <PdfEditor content={content} onChange={(newVal) => { if (isReadOnly) return; setContent(newVal); setIsSaved(false); }} title={title} />
+                <PdfEditor content={content} onChange={(newVal) => { if (isReadOnly) return; handleContentChange(newVal); }} title={title} />
               </div>
             ) : (
               <div className="flex-grow flex overflow-hidden divide-x divide-gray-100 w-full">
@@ -887,6 +1187,9 @@ export default function DocumentEditor({
                       value={content}
                       onChange={(e) => { if (isReadOnly) return; handleTextareaChange(e); }}
                       onKeyDown={(e) => { if (isReadOnly) return; handleTextareaKeyDown(e); }}
+                      onSelect={(e: any) => sendCursorPosition(e.target.selectionStart, e.target.selectionEnd)}
+                      onKeyUp={(e: any) => sendCursorPosition(e.target.selectionStart, e.target.selectionEnd)}
+                      onMouseUp={(e: any) => sendCursorPosition(e.target.selectionStart, e.target.selectionEnd)}
                       readOnly={isReadOnly}
                       className="flex-grow p-6 resize-none focus:outline-none text-sm text-gray-800 font-mono leading-relaxed bg-white placeholder-gray-300 overflow-y-auto"
                       placeholder="Start writing... Type '[[' to link pages. Supports markdown templates (# headers, - lists, tables, code)"

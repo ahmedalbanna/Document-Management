@@ -3,6 +3,8 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
+import { WebSocketServer, WebSocket } from "ws";
+import * as Y from "yjs";
 
 dotenv.config();
 
@@ -1025,9 +1027,276 @@ Format the output strictly as valid JSON according to the schema provided.`;
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
+  const server = app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });
+
+  // Real-time Collaboration States
+  interface Participant {
+    socket: WebSocket;
+    userEmail: string;
+    userName: string;
+    color: string;
+    cursor: { anchor: number; head: number } | null;
+  }
+
+  const activeDocs = new Map<string, Y.Doc>();
+  const docMeta = new Map<string, { title: string; type: string; tags: string[] }>();
+  const rooms = new Map<string, Map<string, Participant>>(); // docId -> (userEmail -> Participant)
+  const docVersions = new Map<string, any[]>(); // docId -> versions array
+  const autoRevisionTimers = new Map<string, any>(); // docId -> Timeout
+
+  // Attach WebSocket Server
+  const wss = new WebSocketServer({ server });
+
+  wss.on("connection", (ws) => {
+    let currentDocId: string | null = null;
+    let currentUserEmail: string | null = null;
+
+    ws.on("message", (messageStr: string) => {
+      try {
+        const data = JSON.parse(messageStr);
+        const { type } = data;
+
+        if (type === "join-room") {
+          const { docId, userEmail, userName, color, initialTitle, initialContent, initialType, initialTags, initialVersions } = data;
+          currentDocId = docId;
+          currentUserEmail = userEmail;
+
+          // Ensure room Map exists
+          if (!rooms.has(docId)) {
+            rooms.set(docId, new Map());
+          }
+
+          // Initialize server-side Yjs document
+          let yDoc = activeDocs.get(docId);
+          if (!yDoc) {
+            yDoc = new Y.Doc();
+            const yText = yDoc.getText("content");
+            yText.insert(0, initialContent || "");
+            activeDocs.set(docId, yDoc);
+            docMeta.set(docId, {
+              title: initialTitle || "Untitled Document",
+              type: initialType || "markdown",
+              tags: initialTags || []
+            });
+            docVersions.set(docId, initialVersions || []);
+          }
+
+          // Add participant
+          const room = rooms.get(docId)!;
+          room.set(userEmail, {
+            socket: ws,
+            userEmail,
+            userName,
+            color,
+            cursor: null
+          });
+
+          // 1. Send the full synchronized state vector of the Yjs document to the client
+          const stateUpdate = Y.encodeStateAsUpdate(yDoc);
+          ws.send(JSON.stringify({
+            type: "yjs-init",
+            docId,
+            update: Array.from(stateUpdate),
+            meta: docMeta.get(docId),
+            versions: docVersions.get(docId) || []
+          }));
+
+          // 2. Send the active participants list to the joining user
+          const participants = Array.from(room.values()).map(p => ({
+            userEmail: p.userEmail,
+            userName: p.userName,
+            color: p.color,
+            cursor: p.cursor
+          }));
+          ws.send(JSON.stringify({
+            type: "presence-list",
+            docId,
+            participants
+          }));
+
+          // 3. Broadcast user-joined to all other users in the room
+          broadcastToRoom(docId, userEmail, {
+            type: "user-joined",
+            docId,
+            participant: {
+              userEmail,
+              userName,
+              color,
+              cursor: null
+            }
+          });
+        }
+
+        else if (type === "yjs-update") {
+          const { docId, update } = data;
+          const yDoc = activeDocs.get(docId);
+          if (yDoc && update) {
+            // Apply update on server
+            Y.applyUpdate(yDoc, new Uint8Array(update), "remote");
+
+            // Broadcast the update to other participants in the room
+            broadcastToRoom(docId, currentUserEmail || "", {
+              type: "yjs-update",
+              docId,
+              update
+            });
+
+            // Handle automatic background revision logging
+            handleAutoRevision(docId);
+          }
+        }
+
+        else if (type === "cursor-moved") {
+          const { docId, userEmail, selection } = data;
+          const room = rooms.get(docId);
+          if (room) {
+            const participant = room.get(userEmail);
+            if (participant) {
+              participant.cursor = selection;
+              
+              // Broadcast cursor update to other participants
+              broadcastToRoom(docId, userEmail, {
+                type: "cursor-moved",
+                docId,
+                userEmail,
+                selection
+              });
+            }
+          }
+        }
+
+        else if (type === "commit-revision") {
+          const { docId, version } = data;
+          if (docId && version) {
+            let versions = docVersions.get(docId) || [];
+            // Deduplicate based on id or versionNumber
+            versions = versions.filter(v => v.id !== version.id && v.versionNumber !== version.versionNumber);
+            versions.push(version);
+            docVersions.set(docId, versions);
+
+            // Broadcast to everyone in the room
+            broadcastToRoom(docId, "", {
+              type: "revision-list-updated",
+              docId,
+              versions
+            });
+          }
+        }
+
+        else if (type === "meta-updated") {
+          const { docId, meta } = data;
+          if (docId && meta) {
+            const oldMeta = docMeta.get(docId) || { title: "", type: "", tags: [] };
+            docMeta.set(docId, { ...oldMeta, ...meta });
+            // Broadcast meta update
+            broadcastToRoom(docId, currentUserEmail || "", {
+              type: "meta-updated",
+              docId,
+              meta
+            });
+          }
+        }
+
+      } catch (err) {
+        console.error("WS message parse/process error:", err);
+      }
+    });
+
+    ws.on("close", () => {
+      if (currentDocId && currentUserEmail) {
+        const room = rooms.get(currentDocId);
+        if (room) {
+          room.delete(currentUserEmail);
+          if (room.size === 0) {
+            rooms.delete(currentDocId);
+          } else {
+            // Broadcast user-left to others
+            broadcastToRoom(currentDocId, currentUserEmail, {
+              type: "user-left",
+              docId: currentDocId,
+              userEmail: currentUserEmail
+            });
+          }
+        }
+      }
+    });
+  });
+
+  function broadcastToRoom(docId: string, excludeEmail: string, payload: any) {
+    const room = rooms.get(docId);
+    if (!room) return;
+
+    const msg = JSON.stringify(payload);
+    for (const [email, participant] of room.entries()) {
+      if (email !== excludeEmail && participant.socket.readyState === WebSocket.OPEN) {
+        participant.socket.send(msg);
+      }
+    }
+  }
+
+  function handleAutoRevision(docId: string) {
+    // Clear existing timer for this doc
+    if (autoRevisionTimers.has(docId)) {
+      clearTimeout(autoRevisionTimers.get(docId));
+    }
+
+    // Set a new 8-second debounce timer to record an automatic conflict-free revision
+    const timer = setTimeout(() => {
+      const yDoc = activeDocs.get(docId);
+      if (!yDoc) return;
+
+      const currentText = yDoc.getText("content").toString();
+      const meta = docMeta.get(docId) || { title: "Untitled", type: "markdown", tags: [] };
+      const versions = docVersions.get(docId) || [];
+
+      // Let's check if the text content has actually changed from the last version
+      const lastVersion = versions[versions.length - 1];
+      if (lastVersion && lastVersion.content === currentText) {
+        return; // No content change, skip
+      }
+
+      const nextVerNum = versions.length > 0 ? Math.max(...versions.map(v => v.versionNumber || 0)) + 1 : 1;
+      const parentId = lastVersion ? lastVersion.id : null;
+
+      // Determine author from room participants
+      const room = rooms.get(docId);
+      let authorNames = "Collaborators";
+      let authorEmail = "system@collab.com";
+      if (room && room.size > 0) {
+        const names = Array.from(room.values()).map(p => p.userName.split(" ")[0]);
+        authorNames = names.join(" & ");
+        authorEmail = Array.from(room.keys()).join(", ");
+      }
+
+      const newAutoVersion = {
+        id: `ver-auto-${Date.now()}`,
+        versionNumber: nextVerNum,
+        parentId,
+        title: meta.title,
+        content: currentText,
+        type: meta.type,
+        tags: meta.tags,
+        changeSummary: `Autosaved live edit by ${authorNames}`,
+        updatedAt: new Date().toISOString(),
+        size: Buffer.byteLength(currentText),
+        author: authorEmail
+      };
+
+      versions.push(newAutoVersion);
+      docVersions.set(docId, versions);
+
+      // Broadcast the new revision to all clients in the room!
+      broadcastToRoom(docId, "", {
+        type: "revision-list-updated",
+        docId,
+        versions
+      });
+    }, 8000);
+
+    autoRevisionTimers.set(docId, timer);
+  }
 }
 
 startServer();
