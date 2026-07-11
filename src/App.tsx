@@ -25,7 +25,8 @@ import {
   Globe,
   Workflow,
   Cpu,
-  Loader2
+  Loader2,
+  Shield
 } from 'lucide-react';
 
 import JSZip from 'jszip';
@@ -43,6 +44,7 @@ import RagChat from './components/RagChat';
 import KnowledgeGraph from './components/KnowledgeGraph';
 import DiagramGenerator from './components/DiagramGenerator';
 import ProactiveInsights from './components/ProactiveInsights';
+import SmartBackup from './components/SmartBackup';
 
 export default function App() {
   // --- Active Persona Session State ---
@@ -54,7 +56,7 @@ export default function App() {
   const [activities, setActivities] = useState<ActivityLog[]>([]);
 
   // --- Workspace Filters & Navigation ---
-  const [activeTab, setActiveTab] = useState<'shelves' | 'all' | 'favorites' | 'trash' | 'chat' | 'graph' | 'diagrams' | 'insights'>('shelves');
+  const [activeTab, setActiveTab] = useState<'shelves' | 'all' | 'favorites' | 'trash' | 'chat' | 'graph' | 'diagrams' | 'insights' | 'backup'>('shelves');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
 
@@ -1173,6 +1175,21 @@ Enter standard paragraphs or lists...`,
           </button>
 
           <button
+            id="tab-backup"
+            onClick={() => { setActiveTab('backup'); setSelectedTag(null); }}
+            className={`w-full text-left font-medium text-xs px-3 py-2 rounded-xl transition-all flex items-center justify-between cursor-pointer ${
+              activeTab === 'backup' 
+                ? 'bg-indigo-50 text-indigo-700 font-semibold' 
+                : 'text-gray-500 hover:bg-gray-50 hover:text-gray-800'
+            }`}
+          >
+            <span className="flex items-center gap-2">
+              <Shield className="h-4 w-4 text-emerald-500" /> Smart Backup (E2E)
+            </span>
+            <span className="font-mono text-[9px] bg-emerald-100 text-emerald-800 font-bold border border-emerald-200 rounded px-1 py-0.2">SECURE</span>
+          </button>
+
+          <button
             id="tab-trash"
             onClick={() => { setActiveTab('trash'); setSelectedTag(null); }}
             className={`w-full text-left font-medium text-xs px-3 py-2 rounded-xl transition-all flex items-center justify-between cursor-pointer ${
@@ -1438,6 +1455,17 @@ Enter standard paragraphs or lists...`,
               onSaveDoc={handleSaveDocEdits}
               onAddDocToShelf={handleAddDocToShelf}
               setDocuments={setDocuments}
+              logAction={logAction}
+              currentUserEmail={currentUserEmail}
+            />
+          ) : activeTab === 'backup' ? (
+            <SmartBackup
+              documents={documents}
+              shelves={shelves}
+              activities={activities}
+              setDocuments={setDocuments}
+              setShelves={setShelves}
+              setActivities={setActivities}
               logAction={logAction}
               currentUserEmail={currentUserEmail}
             />

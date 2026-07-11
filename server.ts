@@ -1012,6 +1012,181 @@ Format the output strictly as valid JSON according to the schema provided.`;
     }
   });
 
+  // --- End-to-End Encrypted Sync Server Storage ---
+  const encryptedSyncs = new Map<string, {
+    ciphertext: string;
+    iv: string;
+    salt: string;
+    deviceLabel: string;
+    timestamp: string;
+  }>();
+
+  // API endpoint for Encrypted Sync - Store/Upload
+  app.post("/api/backup/sync", (req: any, res: any) => {
+    try {
+      const { userEmail, ciphertext, iv, salt, deviceLabel } = req.body;
+      if (!userEmail || !ciphertext || !iv || !salt) {
+        return res.status(400).json({ error: "Missing required encryption parameters." });
+      }
+      encryptedSyncs.set(userEmail, {
+        ciphertext,
+        iv,
+        salt,
+        deviceLabel: deviceLabel || "Unknown Device",
+        timestamp: new Date().toISOString()
+      });
+      res.json({ success: true, timestamp: new Date().toISOString() });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "An error occurred during sync upload." });
+    }
+  });
+
+  // API endpoint for Encrypted Sync - Retrieve/Download
+  app.get("/api/backup/sync", (req: any, res: any) => {
+    try {
+      const userEmail = req.query.userEmail as string;
+      if (!userEmail) {
+        return res.status(400).json({ error: "Missing user email parameter." });
+      }
+      const syncData = encryptedSyncs.get(userEmail);
+      if (!syncData) {
+        return res.status(404).json({ error: "No sync record found for this email." });
+      }
+      res.json(syncData);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "An error occurred during sync retrieval." });
+    }
+  });
+
+  // API endpoint to analyze document list and recommend legacy compression candidates
+  app.post("/api/backup/recommendations", async (req: any, res: any) => {
+    try {
+      const { documents } = req.body;
+      const activeApiKey = process.env.GEMINI_API_KEY;
+      if (!activeApiKey) {
+        return res.status(500).json({ error: "Gemini API Key is not configured." });
+      }
+
+      if (!ai) {
+        ai = new GoogleGenAI({
+          apiKey: activeApiKey,
+          httpOptions: {
+            headers: { 'User-Agent': 'aistudio-build' }
+          }
+        });
+      }
+
+      if (!documents || !Array.isArray(documents)) {
+        return res.status(400).json({ error: "Missing or invalid documents array." });
+      }
+
+      const compactDocs = documents.map((d: any) => ({
+        id: d.id,
+        title: d.title,
+        type: d.type,
+        category: d.category,
+        size: d.size,
+        updatedAt: d.updatedAt || d.createdAt,
+        excerpt: d.content ? d.content.slice(0, 500) : ""
+      }));
+
+      const systemInstruction = `You are an elite system operations analyst and content archivist. 
+Analyze the provided document metadata and excerpts to identify files that are ideal candidates for ZIP compression and archival.
+Target:
+1. Legacy files (explicitly mentions outdated versions, past years e.g., 2023/2024, or labeled 'obsolete/deprecated').
+2. Inactive large text files or platform release checklists that have been completed.
+3. Repetitive bounce configurations or calculations from older iterations.
+
+For each recommended file, provide a structured compression recommendation including a title, candidate docId, rationale, and expected space savings.
+Output strictly JSON matching the specified schema.`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3.5-flash",
+        contents: `Analyze these documents for compression and archival: ${JSON.stringify(compactDocs)}`,
+        config: {
+          systemInstruction,
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              recommendations: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    docId: { type: Type.STRING },
+                    title: { type: Type.STRING },
+                    rationale: { type: Type.STRING, description: "Detailed reason why this file should be compressed" },
+                    savingsPercent: { type: Type.INTEGER, description: "Estimated compression storage savings percentage (e.g. 70, 85)" },
+                    urgency: { type: Type.STRING, description: "High, Medium, or Low" }
+                  },
+                  required: ["docId", "title", "rationale", "savingsPercent", "urgency"]
+                }
+              }
+            },
+            required: ["recommendations"]
+          }
+        }
+      });
+
+      const data = JSON.parse(response.text || "{}");
+      res.json(data);
+    } catch (error: any) {
+      console.error("Backup Recommendations Error:", error);
+      res.status(500).json({ error: error.message || "An error occurred during compression recommendations." });
+    }
+  });
+
+  // API endpoint for AI-assisted file recovery from snapshots/trash
+  app.post("/api/backup/recovery-advice", async (req: any, res: any) => {
+    try {
+      const { query, trashDocuments, snapshots } = req.body;
+      const activeApiKey = process.env.GEMINI_API_KEY;
+      if (!activeApiKey) {
+        return res.status(500).json({ error: "Gemini API Key is not configured." });
+      }
+
+      if (!ai) {
+        ai = new GoogleGenAI({
+          apiKey: activeApiKey,
+          httpOptions: {
+            headers: { 'User-Agent': 'aistudio-build' }
+          }
+        });
+      }
+
+      const formattedTrash = (trashDocuments || []).map((d: any) => `- ID: ${d.id}, Title: "${d.title}" (${d.type}, Category: ${d.category}, Size: ${d.size} bytes, Excerpt: ${d.content ? d.content.slice(0, 300) : ""})`).join("\n");
+      const formattedSnapshots = (snapshots || []).map((s: any) => `- Snapshot ID: ${s.id}, Created: ${s.timestamp}, Label: "${s.label}", Files inside: ${s.documentsCount}`).join("\n");
+
+      const prompt = `You are a high-fidelity Automated Recovery Agent. A user has lost a file or wants to revert to an older state. 
+The user is asking: "${query}"
+
+Here are the items currently in the TRASH BIN:
+${formattedTrash || "No items in trash."}
+
+Here are the available SYSTEM SNAPSHOTS:
+${formattedSnapshots || "No snapshots available."}
+
+Provide a friendly, highly intelligent recovery response in Markdown.
+1. Identify if the document the user is searching for matches any item in the TRASH or inside a SNAPSHOT.
+2. If it matches a TRASH item, explain that they can restore it directly, and specify the exact document ID in this format [trash-recover:document-id] so our system can render a quick action button.
+3. If it matches a SNAPSHOT, specify the snapshot ID in this format [snapshot-restore:snapshot-id] so our system can render a quick restore button.
+4. Suggest a step-by-step resolution path. Keep it extremely helpful and scannable.`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3.5-flash",
+        contents: prompt,
+      });
+
+      res.json({
+        advice: response.text || "No recovery advice generated."
+      });
+    } catch (error: any) {
+      console.error("Recovery advice error:", error);
+      res.status(500).json({ error: error.message || "An error occurred during recovery advice generation." });
+    }
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
