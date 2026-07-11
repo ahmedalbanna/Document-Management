@@ -22,7 +22,8 @@ import {
   Binary,
   Users,
   Lock,
-  Eye
+  Eye,
+  Sparkles
 } from 'lucide-react';
 import { Document, Shelf } from '../types';
 
@@ -40,6 +41,7 @@ interface DocumentCardProps {
   onToggleSelectDoc?: (docId: string, isShift: boolean) => void;
   onShare?: (doc: Document) => void;
   currentUserEmail?: string;
+  semanticSimilarity?: number;
 }
 
 export default function DocumentCard({
@@ -55,6 +57,7 @@ export default function DocumentCard({
   onToggleSelectDoc,
   onShare,
   currentUserEmail,
+  semanticSimilarity,
 }: DocumentCardProps) {
   const [isHovered, setIsHovered] = useState(false);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -380,6 +383,14 @@ export default function DocumentCard({
 
           {/* Indicators */}
           <div className="flex flex-wrap items-center gap-1.5 mt-1">
+            {semanticSimilarity !== undefined && (
+              <span 
+                className="text-[10px] uppercase tracking-wider font-bold border px-1.5 py-0.5 rounded-md bg-gradient-to-r from-violet-600 to-indigo-600 text-white border-violet-500 flex items-center gap-0.5 shadow-sm shadow-violet-100 animate-pulse"
+                title={`Semantic similarity match score: ${Math.round(semanticSimilarity * 100)}%`}
+              >
+                <Sparkles className="h-2.5 w-2.5 fill-current" /> {Math.round(semanticSimilarity * 100)}% Match
+              </span>
+            )}
             <span className={`text-[10px] uppercase tracking-wider font-semibold border px-1.5 py-0.5 rounded-md ${getBadgeColor()}`}>
               {document.type}
             </span>

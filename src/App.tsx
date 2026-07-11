@@ -23,7 +23,9 @@ import {
   Tag,
   Download,
   Globe,
-  Workflow
+  Workflow,
+  Cpu,
+  Loader2
 } from 'lucide-react';
 
 import JSZip from 'jszip';
@@ -36,7 +38,7 @@ import DashboardStats from './components/DashboardStats';
 import UploadModal from './components/UploadModal';
 import MergeModal from './components/MergeModal';
 import ShareModal from './components/ShareModal';
-import { DocumentSearchIndex } from './utils/searchIndex';
+import { DocumentSearchIndex, cosineSimilarity } from './utils/searchIndex';
 import RagChat from './components/RagChat';
 import KnowledgeGraph from './components/KnowledgeGraph';
 import DiagramGenerator from './components/DiagramGenerator';
@@ -54,6 +56,22 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'shelves' | 'all' | 'favorites' | 'trash' | 'chat' | 'graph' | 'diagrams'>('shelves');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
+
+  // --- Semantic Search & Embedding State ---
+  const [cachedEmbeddings, setCachedEmbeddings] = useState<Record<string, { embedding: number[]; updatedAt: string }>>(() => {
+    const saved = localStorage.getItem('doc_manager_embeddings');
+    return saved ? JSON.parse(saved) : {};
+  });
+  const [isSemanticSearch, setIsSemanticSearch] = useState<boolean>(() => {
+    return localStorage.getItem('doc_manager_is_semantic') === 'true';
+  });
+  const [indexingStatus, setIndexingStatus] = useState<{ total: number; indexed: number; isIndexing: boolean }>({
+    total: 0,
+    indexed: 0,
+    isIndexing: false,
+  });
+  const [queryEmbedding, setQueryEmbedding] = useState<number[] | null>(null);
+  const [isSearchingSemantic, setIsSearchingSemantic] = useState<boolean>(false);
 
   // --- Modals Toggle state ---
   const [activeDoc, setActiveDoc] = useState<Document | null>(null);
@@ -199,6 +217,148 @@ export default function App() {
     };
     setActivities(prev => [newLog, ...prev]);
   };
+
+  // --- Persistent Storage Sync for Semantic Search ---
+  useEffect(() => {
+    localStorage.setItem('doc_manager_embeddings', JSON.stringify(cachedEmbeddings));
+  }, [cachedEmbeddings]);
+
+  useEffect(() => {
+    localStorage.setItem('doc_manager_is_semantic', String(isSemanticSearch));
+  }, [isSemanticSearch]);
+
+  // Background Document Embedding Indexer
+  useEffect(() => {
+    let active = true;
+
+    async function runIndexer() {
+      if (documents.length === 0) return;
+
+      // Find documents that need indexing
+      const toIndex = documents.filter(doc => {
+        if (doc.isArchived) return false;
+        
+        const cached = cachedEmbeddings[doc.id];
+        if (!cached) return true;
+        
+        return new Date(doc.updatedAt) > new Date(cached.updatedAt);
+      });
+
+      if (toIndex.length === 0) {
+        if (active) {
+          setIndexingStatus(prev => ({ ...prev, isIndexing: false }));
+        }
+        return;
+      }
+
+      if (active) {
+        setIndexingStatus({
+          total: toIndex.length,
+          indexed: 0,
+          isIndexing: true,
+        });
+      }
+
+      for (let i = 0; i < toIndex.length; i++) {
+        if (!active) break;
+        const doc = toIndex[i];
+        
+        const textToEmbed = `Title: ${doc.title}\nTags: ${doc.tags.join(', ')}\nContent:\n${doc.content}`;
+        
+        try {
+          const res = await fetch('/api/gemini/embeddings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              items: [{ id: doc.id, text: textToEmbed }]
+            }),
+          });
+          
+          if (!res.ok) throw new Error('API failed');
+          const data = await res.json();
+          const embedding = data.embeddings[doc.id];
+          
+          if (embedding && embedding.length > 0) {
+            if (active) {
+              setCachedEmbeddings(prev => ({
+                ...prev,
+                [doc.id]: {
+                  embedding,
+                  updatedAt: doc.updatedAt || new Date().toISOString(),
+                }
+              }));
+              setIndexingStatus(prev => ({
+                ...prev,
+                indexed: i + 1,
+              }));
+            }
+          }
+        } catch (err) {
+          console.error(`Failed to index document ${doc.id}:`, err);
+        }
+        
+        await new Promise(r => setTimeout(r, 1500));
+      }
+
+      if (active) {
+        setIndexingStatus(prev => ({ ...prev, isIndexing: false }));
+      }
+    }
+
+    const timer = setTimeout(() => {
+      runIndexer();
+    }, 2000);
+
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [documents]);
+
+  // Fetch search query embedding on search query change (Debounced)
+  useEffect(() => {
+    const isSimilarSyntax = searchQuery.toLowerCase().includes('similar to');
+    const shouldRunSemantic = isSemanticSearch || isSimilarSyntax;
+
+    if (!shouldRunSemantic || !searchQuery.trim()) {
+      setQueryEmbedding(null);
+      return;
+    }
+
+    const delayDebounceFn = setTimeout(async () => {
+      setIsSearchingSemantic(true);
+      try {
+        const cleanedQuery = searchQuery
+          .replace(/^documents similar to/i, '')
+          .replace(/^similar to/i, '')
+          .replace(/^documents like/i, '')
+          .replace(/^concepts like/i, '')
+          .trim();
+
+        const res = await fetch('/api/gemini/embeddings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            items: [{ id: 'query', text: cleanedQuery || searchQuery }]
+          }),
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          const embedding = data.embeddings['query'];
+          if (embedding && embedding.length > 0) {
+            setQueryEmbedding(embedding);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to fetch query embedding:', err);
+      } finally {
+        setIsSearchingSemantic(false);
+      }
+    }, 600);
+
+    return () => clearTimeout(delayDebounceFn);
+  }, [searchQuery, isSemanticSearch]);
 
   // --- Multi-Selection & Selective Export Bundle handlers ---
   const handleToggleSelectDoc = (docId: string, isShift: boolean, shelfDocs?: Document[]) => {
@@ -829,10 +989,28 @@ Enter standard paragraphs or lists...`,
       baseDocs = baseDocs.filter(d => d.tags.includes(selectedTag));
     }
 
-    // 4. Ranked prefix-matching Full-Text Search (FTS)
+    // 4. Ranked prefix-matching Full-Text Search (FTS) vs Semantic Concept-Based Search
     if (searchQuery.trim()) {
-      const ftsIndex = new DocumentSearchIndex(baseDocs);
-      return ftsIndex.search(searchQuery).map(res => res.document);
+      const isSimilarSyntax = searchQuery.toLowerCase().includes('similar to');
+      const shouldRunSemantic = isSemanticSearch || isSimilarSyntax;
+
+      if (shouldRunSemantic && queryEmbedding) {
+        const scoredDocs = baseDocs.map(doc => {
+          const cached = cachedEmbeddings[doc.id];
+          const similarity = cached ? cosineSimilarity(queryEmbedding, cached.embedding) : 0;
+          return {
+            ...doc,
+            semanticSimilarity: similarity,
+          };
+        });
+
+        return scoredDocs
+          .filter(d => d.semanticSimilarity !== undefined && d.semanticSimilarity > 0)
+          .sort((a, b) => (b.semanticSimilarity || 0) - (a.semanticSimilarity || 0));
+      } else {
+        const ftsIndex = new DocumentSearchIndex(baseDocs);
+        return ftsIndex.search(searchQuery).map(res => res.document);
+      }
     }
 
     return baseDocs;
@@ -1095,19 +1273,60 @@ Enter standard paragraphs or lists...`,
             </div>
           </div>
 
-          <div className="flex items-center gap-2.5">
+          <div className="flex flex-wrap items-center gap-2.5">
+            {/* AI Semantic Indexing Status */}
+            {indexingStatus.isIndexing && (
+              <div 
+                className="flex items-center gap-1.5 bg-violet-50 text-violet-700 border border-violet-100 px-2.5 py-1.5 rounded-xl text-[10px] font-semibold animate-pulse shadow-sm"
+                title={`Generating concept-based embeddings for new or updated files: ${indexingStatus.indexed}/${indexingStatus.total}`}
+              >
+                <Cpu className="h-3.5 w-3.5 animate-spin text-violet-500" />
+                <span className="hidden lg:inline">AI Indexing...</span>
+                <span>{indexingStatus.indexed}/{indexingStatus.total}</span>
+              </div>
+            )}
+
+            {isSearchingSemantic && (
+              <div 
+                className="flex items-center gap-1.5 bg-indigo-50 text-indigo-750 border border-indigo-100 px-2.5 py-1.5 rounded-xl text-[10px] font-semibold shadow-sm animate-pulse"
+                title="AI is translating your query into semantic coordinates..."
+              >
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-indigo-550" />
+                <span>Concept Matching...</span>
+              </div>
+            )}
+
             {/* Search tool block */}
             <div className="relative">
               <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
               <input
                 id="workspace-search-input"
                 type="text"
-                placeholder="Search file names, contents or tags..."
+                placeholder={isSemanticSearch ? "Ask similar to: [Idea X]..." : "Search file names, contents or tags..."}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="bg-white border border-gray-200 rounded-xl pl-9 pr-4 py-2 text-xs focus:ring-1 focus:ring-indigo-500 focus:outline-none w-64 shadow-sm"
+                className={`border rounded-xl pl-9 pr-4 py-2 text-xs focus:ring-1 focus:outline-none w-64 shadow-sm transition-all ${
+                  isSemanticSearch 
+                    ? 'bg-violet-50/35 border-violet-200 focus:ring-violet-500 font-medium placeholder-violet-400/80 text-violet-950' 
+                    : 'bg-white border-gray-200 focus:ring-indigo-500 text-gray-800'
+                }`}
               />
             </div>
+
+            {/* AI Semantic Toggle Button */}
+            <button
+              id="toggle-semantic-search-btn"
+              onClick={() => setIsSemanticSearch(!isSemanticSearch)}
+              className={`px-3 py-2 rounded-xl border flex items-center gap-1.5 justify-center transition-all shadow-sm cursor-pointer text-xs font-semibold ${
+                isSemanticSearch 
+                  ? 'bg-gradient-to-r from-violet-600 to-indigo-600 border-indigo-600 text-white shadow-violet-100/50 hover:from-violet-700 hover:to-indigo-700' 
+                  : 'bg-white border-gray-200 text-gray-500 hover:text-indigo-600 hover:bg-gray-50'
+              }`}
+              title="Toggle AI-Powered Semantic Search (concept similarity instead of exact matching)"
+            >
+              <Sparkles className={`h-3.5 w-3.5 ${isSemanticSearch ? 'fill-current animate-pulse text-yellow-300' : ''}`} />
+              <span className="hidden sm:inline">AI Search</span>
+            </button>
 
             {/* General metrics tracker panel show toggle */}
             <button
@@ -1373,6 +1592,7 @@ Enter standard paragraphs or lists...`,
                             onToggleSelectDoc={(id, isShift) => handleToggleSelectDoc(id, isShift, filteredDocs)}
                             onShare={handleShareDoc}
                             currentUserEmail={currentUserEmail}
+                            semanticSimilarity={(doc as any).semanticSimilarity}
                           />
                         </div>
                       )}

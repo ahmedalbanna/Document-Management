@@ -318,6 +318,58 @@ Return strictly valid JSON matching the requested schema.`;
     }
   });
 
+  // API endpoint for Semantic Embeddings (Local index backend)
+  app.post("/api/gemini/embeddings", async (req: any, res: any) => {
+    try {
+      const { items } = req.body; // array of { id: string, text: string }
+      
+      const activeApiKey = process.env.GEMINI_API_KEY;
+      if (!activeApiKey) {
+        return res.status(500).json({ error: "Gemini API Key is not configured." });
+      }
+
+      if (!ai) {
+        ai = new GoogleGenAI({
+          apiKey: activeApiKey,
+          httpOptions: {
+            headers: { 'User-Agent': 'aistudio-build' }
+          }
+        });
+      }
+
+      if (!items || !Array.isArray(items)) {
+        return res.status(400).json({ error: "Missing or invalid items array." });
+      }
+
+      const results: Record<string, number[]> = {};
+
+      for (const item of items) {
+        if (!item.id || !item.text) continue;
+        
+        try {
+          const response: any = await ai.models.embedContent({
+            model: "gemini-embedding-2-preview",
+            contents: item.text,
+          });
+
+          const embeddingValues = response.embedding?.values || 
+                                  response.embeddings?.[0]?.values || 
+                                  response.embedding || 
+                                  [];
+          results[item.id] = embeddingValues;
+        } catch (itemError: any) {
+          console.error(`Error embedding item ${item.id}:`, itemError);
+          results[item.id] = [];
+        }
+      }
+
+      res.json({ embeddings: results });
+    } catch (error: any) {
+      console.error("Embeddings API Error:", error);
+      res.status(500).json({ error: error.message || "An error occurred during embeddings generation." });
+    }
+  });
+
   // API endpoint to synthesize text to speech (Single Narrator or Audio Podcast)
   app.post("/api/gemini/tts", async (req: any, res: any) => {
     try {
