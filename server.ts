@@ -202,6 +202,310 @@ Return strictly valid JSON matching the requested schema.`;
     }
   });
 
+  // API endpoint to transcribe audio and format as beautifully structured markdown
+  app.post("/api/gemini/dictate-audio", async (req: any, res: any) => {
+    try {
+      const { audio, mimeType, style } = req.body;
+      
+      const activeApiKey = process.env.GEMINI_API_KEY;
+      if (!activeApiKey) {
+        return res.status(500).json({ 
+          error: "Gemini API Key is not configured." 
+        });
+      }
+
+      if (!ai) {
+        ai = new GoogleGenAI({
+          apiKey: activeApiKey,
+          httpOptions: {
+            headers: { 'User-Agent': 'aistudio-build' }
+          }
+        });
+      }
+
+      if (!audio || !mimeType) {
+        return res.status(400).json({ error: "Missing audio data or mimeType" });
+      }
+
+      const formatInstruction = style === "Scientific Report" 
+        ? "Format it as a highly rigorous Scientific Technical Report. Include structured sections, hypotheses, theoretical formulations, and parameters."
+        : style === "Meeting Notes" 
+        ? "Format it as concise Meeting Notes. Include an Agenda, Key Decisions, Action Items with checklists, and next steps."
+        : style === "Product Release Plan" 
+        ? "Format it as a Symmetrical Platform Parity Product Release Plan. Chart web/mobile parity metrics and release goals."
+        : style === "Lively Blog Post"
+        ? "Format it as an engaging, creative and lively blog post, utilizing Markdown bullet points, bold emphasis, and a friendly introduction."
+        : "Format it as a clean, professional, general-purpose document with clear headings, lists, and standard punctuation.";
+
+      const prompt = `Transcribe the attached audio exactly, then format it as a beautifully structured document. 
+      ${formatInstruction} 
+      Ensure the resulting text is highly polished, grammatically perfect, and fully formatted in standard Markdown.`;
+
+      const audioPart = {
+        inlineData: {
+          mimeType: mimeType,
+          data: audio,
+        },
+      };
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3.5-flash",
+        contents: [audioPart, { text: prompt }],
+      });
+
+      res.json({
+        text: response.text || "No transcription text generated."
+      });
+
+    } catch (error: any) {
+      console.error("Dictate Audio Error:", error);
+      res.status(500).json({ error: error.message || "An error occurred during audio dictation analysis." });
+    }
+  });
+
+  // API endpoint to format raw text transcripts
+  app.post("/api/gemini/format-transcript", async (req: any, res: any) => {
+    try {
+      const { text, style } = req.body;
+
+      const activeApiKey = process.env.GEMINI_API_KEY;
+      if (!activeApiKey) {
+        return res.status(500).json({ error: "Gemini API Key is not configured." });
+      }
+
+      if (!ai) {
+        ai = new GoogleGenAI({
+          apiKey: activeApiKey,
+          httpOptions: {
+            headers: { 'User-Agent': 'aistudio-build' }
+          }
+        });
+      }
+
+      if (!text) {
+        return res.status(400).json({ error: "No text transcript provided." });
+      }
+
+      const formatInstruction = style === "Scientific Report" 
+        ? "Format it as a highly rigorous Scientific Technical Report. Include structured sections, hypotheses, theoretical formulations, and parameters."
+        : style === "Meeting Notes" 
+        ? "Format it as concise Meeting Notes. Include an Agenda, Key Decisions, Action Items with checklists, and next steps."
+        : style === "Product Release Plan" 
+        ? "Format it as a Symmetrical Platform Parity Product Release Plan. Chart web/mobile parity metrics and release goals."
+        : style === "Lively Blog Post"
+        ? "Format it as an engaging, creative and lively blog post, utilizing Markdown bullet points, bold emphasis, and a friendly introduction."
+        : "Format it as a clean, professional, general-purpose document with clear headings, lists, and standard punctuation.";
+
+      const prompt = `You are a professional editor. The user has dictated this raw, unstructured, run-on speech transcript:
+      "${text}"
+
+      Please transform this raw speech transcript into a beautifully structured, highly readable document.
+      ${formatInstruction}
+      Maintain all technical detail and vocabulary, but fix run-on sentences, stuttering, and punctuation. Present the final result in clean, well-spaced Markdown.`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3.5-flash",
+        contents: prompt,
+      });
+
+      res.json({
+        text: response.text || "No formatted text generated."
+      });
+
+    } catch (error: any) {
+      console.error("Format Transcript Error:", error);
+      res.status(500).json({ error: error.message || "An error occurred during transcript formatting." });
+    }
+  });
+
+  // API endpoint to synthesize text to speech (Single Narrator or Audio Podcast)
+  app.post("/api/gemini/tts", async (req: any, res: any) => {
+    try {
+      const { text, type, style } = req.body;
+
+      const activeApiKey = process.env.GEMINI_API_KEY;
+      if (!activeApiKey) {
+        return res.status(500).json({ error: "Gemini API Key is not configured." });
+      }
+
+      if (!ai) {
+        ai = new GoogleGenAI({
+          apiKey: activeApiKey,
+          httpOptions: {
+            headers: { 'User-Agent': 'aistudio-build' }
+          }
+        });
+      }
+
+      if (!text) {
+        return res.status(400).json({ error: "No text provided for TTS." });
+      }
+
+      let audioBase64 = "";
+      let script = "";
+
+      if (type === "single") {
+        // Single speaker narration script
+        // If text is too long, first generate a concise audio summary script
+        let voiceText = text;
+        if (text.length > 800) {
+          const summaryResponse = await ai.models.generateContent({
+            model: "gemini-3.5-flash",
+            contents: `Please create a 120-180 words speech summary narration of the following document. Make it highly engaging to listen to: \n\n${text}`,
+          });
+          voiceText = summaryResponse.text || text;
+        }
+
+        script = voiceText;
+
+        const response = await ai.models.generateContent({
+          model: "gemini-3.1-flash-tts-preview",
+          contents: [{ parts: [{ text: `Say clearly and professionally: ${voiceText}` }] }],
+          config: {
+            responseModalities: ["AUDIO"],
+            speechConfig: {
+              voiceConfig: {
+                prebuiltVoiceConfig: { voiceName: "Zephyr" },
+              },
+            },
+          },
+        });
+
+        audioBase64 = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data || "";
+      } else {
+        // Multi-speaker Podcast Mode
+        // 1. Generate dialogue script between Joe and Jane
+        const scriptPrompt = `You are an expert podcast scriptwriter. Convert the following document into a highly engaging, friendly, and natural conversation script between two co-hosts: Joe (warm, energetic, tech curious) and Jane (brilliant, analytical, friendly). 
+        The script must consist of dialogue lines starting strictly with "Joe:" or "Jane:".
+        Keep it concise (approx. 150-250 words total) so the audio is informative and fast-paced. Joe should discuss the technical structure, while Jane clarifies the core insights.
+        Do not include any parenthetical directions, sound effects, or brackets like (laughs) or [music]. 
+        Document Content:
+        "${text}"`;
+
+        const scriptResponse = await ai.models.generateContent({
+          model: "gemini-3.5-flash",
+          contents: scriptPrompt,
+        });
+
+        script = scriptResponse.text || "";
+
+        // 2. Synthesize multi-speaker audio using gemini-3.1-flash-tts-preview
+        const response = await ai.models.generateContent({
+          model: "gemini-3.1-flash-tts-preview",
+          contents: [{ parts: [{ text: `TTS the following conversation between Joe and Jane:\n\n${script}` }] }],
+          config: {
+            responseModalities: ["AUDIO"],
+            speechConfig: {
+              multiSpeakerVoiceConfig: {
+                speakerVoiceConfigs: [
+                  {
+                    speaker: "Joe",
+                    voiceConfig: {
+                      prebuiltVoiceConfig: { voiceName: "Kore" }
+                    }
+                  },
+                  {
+                    speaker: "Jane",
+                    voiceConfig: {
+                      prebuiltVoiceConfig: { voiceName: "Puck" }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        });
+
+        audioBase64 = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data || "";
+      }
+
+      res.json({
+        audio: audioBase64,
+        script: script
+      });
+
+    } catch (error: any) {
+      console.error("TTS API Error:", error);
+      res.status(500).json({ error: error.message || "An error occurred during Text-to-Speech synthesis." });
+    }
+  });
+
+  // API endpoint for real-time grammar checks and rewrites
+  app.post("/api/gemini/grammar-rewriting", async (req: any, res: any) => {
+    try {
+      const { text } = req.body;
+
+      const activeApiKey = process.env.GEMINI_API_KEY;
+      if (!activeApiKey) {
+        return res.status(500).json({ error: "Gemini API Key is not configured." });
+      }
+
+      if (!ai) {
+        ai = new GoogleGenAI({
+          apiKey: activeApiKey,
+          httpOptions: {
+            headers: { 'User-Agent': 'aistudio-build' }
+          }
+        });
+      }
+
+      if (!text) {
+        return res.status(400).json({ error: "No text provided." });
+      }
+
+      const prompt = `Analyze the following document text for grammar, spelling, and style improvements. Also provide dynamic tone rewrites.
+      
+      Document Content:
+      "${text}"`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3.5-flash",
+        contents: prompt,
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              corrections: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    original: { type: Type.STRING, description: "The exact wrong/unpolished substring to be replaced." },
+                    replacement: { type: Type.STRING, description: "The corrected or polished replacement substring." },
+                    explanation: { type: Type.STRING, description: "Brief friendly explanation of what was corrected." },
+                    context: { type: Type.STRING, description: "A snippet showing the issue in context." }
+                  },
+                  required: ["original", "replacement", "explanation"]
+                }
+              },
+              rewrites: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    style: { type: Type.STRING, description: "The target tone, e.g. Professional, Casual, Punchy, Technical, Explain to a Kid" },
+                    text: { type: Type.STRING, description: "The rewritten full text or key paragraph in this style." },
+                    explanation: { type: Type.STRING, description: "Brief note of what this style enhances." }
+                  },
+                  required: ["style", "text", "explanation"]
+                }
+              }
+            },
+            required: ["corrections", "rewrites"]
+          }
+        }
+      });
+
+      const data = JSON.parse(response.text || "{}");
+      res.json(data);
+
+    } catch (error: any) {
+      console.error("Grammar API Error:", error);
+      res.status(500).json({ error: error.message || "An error occurred during grammar/rewriting analysis." });
+    }
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({

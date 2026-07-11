@@ -36,6 +36,7 @@ import ZipEditor from './ZipEditor';
 import OtherEditor from './OtherEditor';
 import DocsEditor from './DocsEditor';
 import PdfEditor from './PdfEditor';
+import SmartVoiceSuite from './SmartVoiceSuite';
 
 interface DocumentEditorProps {
   document: Document;
@@ -217,7 +218,7 @@ export default function DocumentEditor({
     setIsSaved(isUnchanged);
   }, [title, content, type, category, tags, document]);
 
-  const [activeSidebarTab, setActiveSidebarTab] = useState<'metadata' | 'history' | 'backlinks'>('metadata');
+  const [activeSidebarTab, setActiveSidebarTab] = useState<'metadata' | 'history' | 'backlinks' | 'voice_ai'>('metadata');
   const [showSaveConfirm, setShowSaveConfirm] = useState(false);
   const [changeDescription, setChangeDescription] = useState('');
   const [selectedVersionForDiff, setSelectedVersionForDiff] = useState<DocumentVersion | null>(null);
@@ -890,28 +891,40 @@ export default function DocumentEditor({
               <button
                 id="sidebar-tab-metadata"
                 onClick={() => setActiveSidebarTab('metadata')}
-                className={`flex-1 py-1.5 px-2 text-xs font-semibold rounded-lg transition-all flex items-center justify-center gap-1 cursor-pointer ${
+                className={`flex-1 py-1.5 px-1.5 text-[11px] font-semibold rounded-lg transition-all flex items-center justify-center gap-0.5 cursor-pointer ${
                   activeSidebarTab === 'metadata'
                     ? 'bg-white text-gray-800 shadow-sm'
                     : 'text-gray-550 hover:text-gray-900 hover:bg-white/40'
                 }`}
               >
-                <Tag className="h-3.5 w-3.5" />
+                <Tag className="h-3 w-3" />
                 Props
+              </button>
+              <button
+                id="sidebar-tab-voice"
+                onClick={() => setActiveSidebarTab('voice_ai')}
+                className={`flex-1 py-1.5 px-1.5 text-[11px] font-semibold rounded-lg transition-all flex items-center justify-center gap-0.5 cursor-pointer ${
+                  activeSidebarTab === 'voice_ai'
+                    ? 'bg-white text-gray-800 shadow-sm'
+                    : 'text-gray-550 hover:text-gray-900 hover:bg-white/40'
+                }`}
+              >
+                <Sparkles className="h-3 w-3" />
+                AI
               </button>
               <button
                 id="sidebar-tab-history"
                 onClick={() => setActiveSidebarTab('history')}
-                className={`flex-1 py-1.5 px-2 text-xs font-semibold rounded-lg transition-all flex items-center justify-center gap-1 cursor-pointer ${
+                className={`flex-1 py-1.5 px-1.5 text-[11px] font-semibold rounded-lg transition-all flex items-center justify-center gap-0.5 cursor-pointer ${
                   activeSidebarTab === 'history'
                     ? 'bg-white text-gray-800 shadow-sm'
                     : 'text-gray-550 hover:text-gray-900 hover:bg-white/40'
                 }`}
               >
-                <History className="h-3.5 w-3.5" />
+                <History className="h-3 w-3" />
                 History
                 {docVersions.length > 0 && (
-                  <span className="bg-indigo-50 text-indigo-750 font-mono text-[9px] px-1.5 py-0.5 rounded-md font-bold leading-none">
+                  <span className="bg-indigo-50 text-indigo-750 font-mono text-[9px] px-1 py-0.5 rounded-md font-bold leading-none">
                     {docVersions.length}
                   </span>
                 )}
@@ -919,16 +932,16 @@ export default function DocumentEditor({
               <button
                 id="sidebar-tab-backlinks"
                 onClick={() => setActiveSidebarTab('backlinks')}
-                className={`flex-1 py-1.5 px-2 text-xs font-semibold rounded-lg transition-all flex items-center justify-center gap-1 cursor-pointer ${
+                className={`flex-1 py-1.5 px-1.5 text-[11px] font-semibold rounded-lg transition-all flex items-center justify-center gap-0.5 cursor-pointer ${
                   activeSidebarTab === 'backlinks'
                     ? 'bg-white text-gray-800 shadow-sm'
                     : 'text-gray-550 hover:text-gray-900 hover:bg-white/40'
                 }`}
               >
-                <ExternalLink className="h-3.5 w-3.5" />
+                <ExternalLink className="h-3 w-3" />
                 Links
                 {backlinks.length > 0 && (
-                  <span className="bg-indigo-50 text-indigo-750 font-mono text-[9px] px-1.5 py-0.5 rounded-md font-bold leading-none">
+                  <span className="bg-indigo-50 text-indigo-750 font-mono text-[9px] px-1 py-0.5 rounded-md font-bold leading-none">
                     {backlinks.length}
                   </span>
                 )}
@@ -1308,7 +1321,7 @@ export default function DocumentEditor({
                   );
                 })()}
               </div>
-            ) : (
+            ) : activeSidebarTab === 'backlinks' ? (
               <div className="flex flex-col gap-3 flex-grow overflow-hidden select-none">
                 <div className="flex flex-col">
                   <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Incoming References</span>
@@ -1375,6 +1388,20 @@ export default function DocumentEditor({
                   )}
                 </div>
               </div>
+            ) : (
+              <SmartVoiceSuite
+                content={content}
+                onChangeContent={(val) => {
+                  setContent(val);
+                  setIsSaved(false);
+                }}
+                title={title}
+                onChangeTitle={(val) => {
+                  setTitle(val);
+                  setIsSaved(false);
+                }}
+                isReadOnly={isReadOnly}
+              />
             )}
           </div>
 
