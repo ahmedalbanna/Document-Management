@@ -26,7 +26,8 @@ import {
   Workflow,
   Cpu,
   Loader2,
-  Shield
+  Shield,
+  Presentation
 } from 'lucide-react';
 
 import JSZip from 'jszip';
@@ -45,6 +46,7 @@ import KnowledgeGraph from './components/KnowledgeGraph';
 import DiagramGenerator from './components/DiagramGenerator';
 import ProactiveInsights from './components/ProactiveInsights';
 import SmartBackup from './components/SmartBackup';
+import PresentationWorkspace from './components/PresentationWorkspace';
 
 export default function App() {
   // --- Active Persona Session State ---
@@ -56,7 +58,7 @@ export default function App() {
   const [activities, setActivities] = useState<ActivityLog[]>([]);
 
   // --- Workspace Filters & Navigation ---
-  const [activeTab, setActiveTab] = useState<'shelves' | 'all' | 'favorites' | 'trash' | 'chat' | 'graph' | 'diagrams' | 'insights' | 'backup'>('shelves');
+  const [activeTab, setActiveTab] = useState<'shelves' | 'all' | 'favorites' | 'trash' | 'chat' | 'graph' | 'diagrams' | 'insights' | 'backup' | 'presentation'>('shelves');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
 
@@ -1190,6 +1192,21 @@ Enter standard paragraphs or lists...`,
           </button>
 
           <button
+            id="tab-presentation"
+            onClick={() => { setActiveTab('presentation'); setSelectedTag(null); }}
+            className={`w-full text-left font-medium text-xs px-3 py-2 rounded-xl transition-all flex items-center justify-between cursor-pointer ${
+              activeTab === 'presentation' 
+                ? 'bg-indigo-50 text-indigo-700 font-semibold' 
+                : 'text-gray-500 hover:bg-gray-50 hover:text-gray-800'
+            }`}
+          >
+            <span className="flex items-center gap-2">
+              <Presentation className="h-4 w-4 text-indigo-500 fill-current animate-pulse" /> Auto-Presentation Mode
+            </span>
+            <span className="font-mono text-[9px] bg-indigo-100 text-indigo-800 font-bold border border-indigo-200 rounded px-1 py-0.2">AI DECK</span>
+          </button>
+
+          <button
             id="tab-trash"
             onClick={() => { setActiveTab('trash'); setSelectedTag(null); }}
             className={`w-full text-left font-medium text-xs px-3 py-2 rounded-xl transition-all flex items-center justify-between cursor-pointer ${
@@ -1469,6 +1486,15 @@ Enter standard paragraphs or lists...`,
               logAction={logAction}
               currentUserEmail={currentUserEmail}
             />
+          ) : activeTab === 'presentation' ? (
+            <PresentationWorkspace
+              documents={documents}
+              shelves={shelves}
+              preselectedDocIds={selectedDocIds}
+              onSaveDoc={handleSaveDocEdits}
+              onAddDocToShelf={handleAddDocToShelf}
+              currentUserEmail={currentUserEmail}
+            />
           ) : activeTab === 'shelves' && !selectedTag && searchQuery === '' ? (
             // GRID SHELVES LIST (Default View)
             <div className="flex flex-col">
@@ -1737,6 +1763,15 @@ Enter standard paragraphs or lists...`,
                 className="px-3 py-2 bg-gray-800 hover:bg-gray-700 text-white border border-gray-750 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1.5"
               >
                 <Sparkles className="h-3.5 w-3.5 text-indigo-400 fill-current animate-pulse" /> Compile Report
+              </button>
+
+              <button
+                type="button"
+                id="auto-present-toolbar-btn"
+                onClick={() => setActiveTab('presentation')}
+                className="px-3 py-2 bg-indigo-650 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-sm transition-all cursor-pointer flex items-center gap-1.5"
+              >
+                <Presentation className="h-3.5 w-3.5 text-indigo-300 animate-pulse fill-current" /> Auto-Present
               </button>
               
               <button

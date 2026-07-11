@@ -767,6 +767,114 @@ Format the output strictly as valid JSON according to the schema provided.`;
     }
   });
 
+  // API endpoint for Auto-Presentation Mode Slide Generation
+  app.post("/api/gemini/presentation", async (req: any, res: any) => {
+    try {
+      const { documents, focusPrompt, slideCount = 6 } = req.body;
+
+      const activeApiKey = process.env.GEMINI_API_KEY;
+      if (!activeApiKey) {
+        return res.status(500).json({ error: "Gemini API Key is not configured." });
+      }
+
+      if (!ai) {
+        ai = new GoogleGenAI({
+          apiKey: activeApiKey,
+          httpOptions: {
+            headers: { 'User-Agent': 'aistudio-build' }
+          }
+        });
+      }
+
+      if (!documents || !Array.isArray(documents) || documents.length === 0) {
+        return res.status(400).json({ error: "No documents provided for presentation generation." });
+      }
+
+      // Format documents compactly to act as context for slide narrative
+      const docContexts = documents.map((doc: any, index: number) => {
+        return `--- SOURCE DOCUMENT ${index + 1} ---
+Title: ${doc.title}
+Type: ${doc.type}
+Tags: ${(doc.tags || []).join(", ")}
+Content:
+${doc.content.slice(0, 3000)}
+---------------------------`;
+      }).join("\n\n");
+
+      const systemInstruction = `You are an elite presentation designer and master tech storyteller.
+Your task is to take a cluster of source documents and transform them into a highly cohesive, engaging, and professional presentation slide deck.
+
+Your goals:
+1. Build a professional slide deck of exactly ${slideCount} slides (including a beautiful title slide).
+2. Choose from the available layout styles for each slide based on the content type:
+   - "title": Intended for Title/Cover slides. Has title, subtitle, and speaker notes.
+   - "bullet": Clean bullet points highlighting core facts or metrics.
+   - "two-column": Highlights comparative metrics, contrasting features, or dual arguments.
+   - "quote": Highlights a key thought, equation insight, or testimonial in a quote block.
+   - "formula": Focuses on a mathematical equation, LaTeX segment, or key mechanical parameter.
+   - "code": High-contrast code syntax block with line explanations.
+3. Incorporate key technical formulas (e.g. LaTeX formulas like $CoR = \\frac{v_f}{v_i}$), equations, and parameters from the source documents when available.
+4. Draft a narrative flow that reads like a professional keynote presentation. Ensure every slide includes highly detailed speakerNotes telling the user exactly what to say when presenting, and a visualDescription outlining professional diagrams, statistics, or slide animations to display.
+5. If a focusPrompt is provided, tailor the narrative emphasis, tone, and depth to align directly with it.`;
+
+      const promptInput = `Focus Prompt / Presentation Goal: ${focusPrompt || "Provide a comprehensive, high-fidelity overview of the source technical materials."}
+
+Analyze the following source documents and design a high-fidelity presentation:
+
+${docContexts}`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3.5-flash",
+        contents: promptInput,
+        config: {
+          systemInstruction,
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              title: { type: Type.STRING, description: "A compelling, professional presentation title." },
+              subtitle: { type: Type.STRING, description: "A supportive presentation subtitle." },
+              narrative: { type: Type.STRING, description: "The overarching theme or storyline tying all slides together." },
+              slides: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    slideNumber: { type: Type.INTEGER },
+                    layout: { type: Type.STRING, description: "Must be one of: title, bullet, two-column, quote, formula, code" },
+                    header: { type: Type.STRING, description: "A punchy, clear header for the slide." },
+                    subtitle: { type: Type.STRING, description: "An optional subheading or theme marker." },
+                    bullets: {
+                      type: Type.ARRAY,
+                      items: { type: Type.STRING },
+                      description: "List of bullet points. Keep them punchy and high impact."
+                    },
+                    code: { type: Type.STRING, description: "Raw code block, raw LaTeX formula, or technical schema data (for 'code' or 'formula' layouts)." },
+                    quote: { type: Type.STRING, description: "The quote statement (for 'quote' layout)." },
+                    citation: { type: Type.STRING, description: "The person/source being cited (for 'quote' layout)." },
+                    leftColumn: { type: Type.STRING, description: "Body or bullet text for the left side of a two-column layout." },
+                    rightColumn: { type: Type.STRING, description: "Body or bullet text for the right side of a two-column layout." },
+                    speakerNotes: { type: Type.STRING, description: "Extremely detailed notes and narration script for the speaker." },
+                    visualDescription: { type: Type.STRING, description: "A description of the matching illustration, charts, animations, or diagrams." }
+                  },
+                  required: ["slideNumber", "layout", "header", "speakerNotes", "visualDescription"]
+                }
+              }
+            },
+            required: ["title", "subtitle", "narrative", "slides"]
+          }
+        }
+      });
+
+      const data = JSON.parse(response.text || "{}");
+      res.json(data);
+
+    } catch (error: any) {
+      console.error("Presentation Generation API Error:", error);
+      res.status(500).json({ error: error.message || "An error occurred during presentation slide generation." });
+    }
+  });
+
   // API endpoint for Automated Weekly Achievements Summary
   app.post("/api/gemini/weekly-summary", async (req: any, res: any) => {
     try {
