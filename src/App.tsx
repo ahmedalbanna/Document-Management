@@ -22,7 +22,8 @@ import {
   RotateCcw,
   Tag,
   Download,
-  Globe
+  Globe,
+  Workflow
 } from 'lucide-react';
 
 import JSZip from 'jszip';
@@ -38,6 +39,7 @@ import ShareModal from './components/ShareModal';
 import { DocumentSearchIndex } from './utils/searchIndex';
 import RagChat from './components/RagChat';
 import KnowledgeGraph from './components/KnowledgeGraph';
+import DiagramGenerator from './components/DiagramGenerator';
 
 export default function App() {
   // --- Active Persona Session State ---
@@ -49,7 +51,7 @@ export default function App() {
   const [activities, setActivities] = useState<ActivityLog[]>([]);
 
   // --- Workspace Filters & Navigation ---
-  const [activeTab, setActiveTab] = useState<'shelves' | 'all' | 'favorites' | 'trash' | 'chat' | 'graph'>('shelves');
+  const [activeTab, setActiveTab] = useState<'shelves' | 'all' | 'favorites' | 'trash' | 'chat' | 'graph' | 'diagrams'>('shelves');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
 
@@ -962,6 +964,21 @@ Enter standard paragraphs or lists...`,
           </button>
 
           <button
+            id="tab-diagrams"
+            onClick={() => { setActiveTab('diagrams'); setSelectedTag(null); }}
+            className={`w-full text-left font-medium text-xs px-3 py-2 rounded-xl transition-all flex items-center justify-between cursor-pointer ${
+              activeTab === 'diagrams' 
+                ? 'bg-indigo-50 text-indigo-700 font-semibold' 
+                : 'text-gray-500 hover:bg-gray-50 hover:text-gray-800'
+            }`}
+          >
+            <span className="flex items-center gap-2">
+              <Workflow className="h-4 w-4 text-indigo-500" /> AI Auto-Diagramming
+            </span>
+            <span className="font-mono text-[9px] bg-indigo-100 text-indigo-800 font-bold border border-indigo-200 rounded px-1 py-0.2">AI</span>
+          </button>
+
+          <button
             id="tab-trash"
             onClick={() => { setActiveTab('trash'); setSelectedTag(null); }}
             className={`w-full text-left font-medium text-xs px-3 py-2 rounded-xl transition-all flex items-center justify-between cursor-pointer ${
@@ -1065,12 +1082,14 @@ Enter standard paragraphs or lists...`,
                  activeTab === 'all' ? 'All Workspace Logs' : 
                  activeTab === 'favorites' ? 'Starred Log entries' : 
                  activeTab === 'chat' ? 'Workspace Assistant' : 
-                 activeTab === 'graph' ? 'AI Knowledge Graph' : 'Trash Collection'}
+                 activeTab === 'graph' ? 'AI Knowledge Graph' : 
+                 activeTab === 'diagrams' ? 'AI Auto-Diagramming Engine' : 'Trash Collection'}
               </h2>
               <p className="text-xs text-gray-400 mt-0.5">
                 {activeTab === 'shelves' ? 'Categorized rows according to physics equations and balance release cycles' : 
                  activeTab === 'chat' ? 'Discuss, summarize, or query document collections locally with Gemini' :
                  activeTab === 'graph' ? 'Interactive 3D representation mapping semantic document connections and unwritten research' :
+                 activeTab === 'diagrams' ? 'Generate, render, and edit flowcharts and database schemas dynamically using AI' :
                  `Secure file lists holding ${filteredDocs.length} elements.`}
               </p>
             </div>
@@ -1162,6 +1181,16 @@ Enter standard paragraphs or lists...`,
               shelves={shelves}
               onOpenDoc={handleOpenDoc}
               onCreateDocFromLink={handleCreateDocFromLink}
+              currentUserEmail={currentUserEmail}
+            />
+          ) : activeTab === 'diagrams' ? (
+            <DiagramGenerator
+              documents={documents}
+              shelves={shelves}
+              onSaveDoc={handleSaveDocEdits}
+              onAddDocToShelf={handleAddDocToShelf}
+              setDocuments={setDocuments}
+              logAction={logAction}
               currentUserEmail={currentUserEmail}
             />
           ) : activeTab === 'shelves' && !selectedTag && searchQuery === '' ? (

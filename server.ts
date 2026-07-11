@@ -506,6 +506,125 @@ Return strictly valid JSON matching the requested schema.`;
     }
   });
 
+  // API endpoint for automated diagram generation
+  app.post("/api/gemini/generate-diagram", async (req: any, res: any) => {
+    try {
+      const { description, diagramType } = req.body;
+
+      const activeApiKey = process.env.GEMINI_API_KEY;
+      if (!activeApiKey) {
+        return res.status(500).json({ error: "Gemini API Key is not configured." });
+      }
+
+      if (!ai) {
+        ai = new GoogleGenAI({
+          apiKey: activeApiKey,
+          httpOptions: {
+            headers: { 'User-Agent': 'aistudio-build' }
+          }
+        });
+      }
+
+      if (!description || !diagramType) {
+        return res.status(400).json({ error: "Missing description or diagramType" });
+      }
+
+      const prompt = `You are an expert system architect and diagram designer. 
+      Generate a high-quality technical diagram based on this description: "${description}"
+      The requested diagram format is: "${diagramType}".
+
+      Please generate:
+      1. A brief high-level architectural explanation of the diagram.
+      2. The raw code for the diagram:
+         - For 'flowchart' or 'mermaid', provide a valid, well-commented Mermaid.js diagram starting with 'graph TD' or 'sequenceDiagram'.
+         - For 'sql', provide standard, clean SQL DDL table creation statements (e.g. 'CREATE TABLE ...' with primary/foreign keys).
+      3. A structured representation of the diagram for dynamic visual rendering:
+         - If the diagramType is 'flowchart' or 'mermaid':
+           - Provide 'nodes': array of { id: string, label: string, type: 'start'|'process'|'decision'|'end'|'actor' }
+           - Provide 'links': array of { source: string, target: string, label?: string }
+         - If the diagramType is 'sql':
+           - Provide 'tables': array of { name: string, columns: array of { name: string, type: string, isPrimaryKey: boolean, isForeignKey: boolean, referencesTable?: string } }
+
+      Output MUST be strictly valid JSON matching the requested schema.`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3.5-flash",
+        contents: prompt,
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              explanation: { type: Type.STRING, description: "A brief architectural explanation of the generated diagram." },
+              rawCode: { type: Type.STRING, description: "The raw Mermaid diagram text or SQL creation script." },
+              visualData: {
+                type: Type.OBJECT,
+                properties: {
+                  nodes: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        id: { type: Type.STRING },
+                        label: { type: Type.STRING },
+                        type: { type: Type.STRING, description: "start, process, decision, end, actor" }
+                      },
+                      required: ["id", "label", "type"]
+                    }
+                  },
+                  links: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        source: { type: Type.STRING },
+                        target: { type: Type.STRING },
+                        label: { type: Type.STRING }
+                      },
+                      required: ["source", "target"]
+                    }
+                  },
+                  tables: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        name: { type: Type.STRING },
+                        columns: {
+                          type: Type.ARRAY,
+                          items: {
+                            type: Type.OBJECT,
+                            properties: {
+                              name: { type: Type.STRING },
+                              type: { type: Type.STRING },
+                              isPrimaryKey: { type: Type.BOOLEAN },
+                              isForeignKey: { type: Type.BOOLEAN },
+                              referencesTable: { type: Type.STRING }
+                            },
+                            required: ["name", "type", "isPrimaryKey", "isForeignKey"]
+                          }
+                        }
+                      },
+                      required: ["name", "columns"]
+                    }
+                  }
+                }
+              }
+            },
+            required: ["explanation", "rawCode", "visualData"]
+          }
+        }
+      });
+
+      const data = JSON.parse(response.text || "{}");
+      res.json(data);
+
+    } catch (error: any) {
+      console.error("Diagram API Error:", error);
+      res.status(500).json({ error: error.message || "An error occurred during diagram generation." });
+    }
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
