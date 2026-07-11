@@ -42,6 +42,7 @@ import { DocumentSearchIndex, cosineSimilarity } from './utils/searchIndex';
 import RagChat from './components/RagChat';
 import KnowledgeGraph from './components/KnowledgeGraph';
 import DiagramGenerator from './components/DiagramGenerator';
+import ProactiveInsights from './components/ProactiveInsights';
 
 export default function App() {
   // --- Active Persona Session State ---
@@ -53,7 +54,7 @@ export default function App() {
   const [activities, setActivities] = useState<ActivityLog[]>([]);
 
   // --- Workspace Filters & Navigation ---
-  const [activeTab, setActiveTab] = useState<'shelves' | 'all' | 'favorites' | 'trash' | 'chat' | 'graph' | 'diagrams'>('shelves');
+  const [activeTab, setActiveTab] = useState<'shelves' | 'all' | 'favorites' | 'trash' | 'chat' | 'graph' | 'diagrams' | 'insights'>('shelves');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
 
@@ -1157,6 +1158,21 @@ Enter standard paragraphs or lists...`,
           </button>
 
           <button
+            id="tab-insights"
+            onClick={() => { setActiveTab('insights'); setSelectedTag(null); }}
+            className={`w-full text-left font-medium text-xs px-3 py-2 rounded-xl transition-all flex items-center justify-between cursor-pointer ${
+              activeTab === 'insights' 
+                ? 'bg-indigo-50 text-indigo-700 font-semibold' 
+                : 'text-gray-500 hover:bg-gray-50 hover:text-gray-800'
+            }`}
+          >
+            <span className="flex items-center gap-2">
+              <Sparkles className="h-4 w-4 text-violet-500 animate-bounce" /> AI Proactive Insights
+            </span>
+            <span className="font-mono text-[9px] bg-violet-100 text-violet-800 font-bold border border-violet-200 rounded px-1 py-0.2">NEW</span>
+          </button>
+
+          <button
             id="tab-trash"
             onClick={() => { setActiveTab('trash'); setSelectedTag(null); }}
             className={`w-full text-left font-medium text-xs px-3 py-2 rounded-xl transition-all flex items-center justify-between cursor-pointer ${
@@ -1261,13 +1277,15 @@ Enter standard paragraphs or lists...`,
                  activeTab === 'favorites' ? 'Starred Log entries' : 
                  activeTab === 'chat' ? 'Workspace Assistant' : 
                  activeTab === 'graph' ? 'AI Knowledge Graph' : 
-                 activeTab === 'diagrams' ? 'AI Auto-Diagramming Engine' : 'Trash Collection'}
+                 activeTab === 'diagrams' ? 'AI Auto-Diagramming Engine' : 
+                 activeTab === 'insights' ? 'AI Proactive Insights' : 'Trash Collection'}
               </h2>
               <p className="text-xs text-gray-400 mt-0.5">
                 {activeTab === 'shelves' ? 'Categorized rows according to physics equations and balance release cycles' : 
                  activeTab === 'chat' ? 'Discuss, summarize, or query document collections locally with Gemini' :
                  activeTab === 'graph' ? 'Interactive 3D representation mapping semantic document connections and unwritten research' :
                  activeTab === 'diagrams' ? 'Generate, render, and edit flowcharts and database schemas dynamically using AI' :
+                 activeTab === 'insights' ? 'Discover outdated document alerts, logical contradictions, and weekly achievements summaries' :
                  `Secure file lists holding ${filteredDocs.length} elements.`}
               </p>
             </div>
@@ -1406,6 +1424,17 @@ Enter standard paragraphs or lists...`,
             <DiagramGenerator
               documents={documents}
               shelves={shelves}
+              onSaveDoc={handleSaveDocEdits}
+              onAddDocToShelf={handleAddDocToShelf}
+              setDocuments={setDocuments}
+              logAction={logAction}
+              currentUserEmail={currentUserEmail}
+            />
+          ) : activeTab === 'insights' ? (
+            <ProactiveInsights
+              documents={documents}
+              activities={activities}
+              onOpenDoc={handleOpenDoc}
               onSaveDoc={handleSaveDocEdits}
               onAddDocToShelf={handleAddDocToShelf}
               setDocuments={setDocuments}

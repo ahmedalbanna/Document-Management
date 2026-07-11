@@ -239,4 +239,53 @@ Where $A$ is primary transaction times and $B$ is replica response delays. An ab
     ],
     shareSettings: { isPublic: true, publicRole: 'viewer' }
   },
+  {
+    id: 'doc-outdated-2023',
+    title: 'Legacy Elastomer Coefficients (2023)',
+    content: `# Legacy Elastomer Coefficients (Draft 2023)
+
+This document lists the original mechanical friction and elastomer rebound coefficient specifications compiled in November 2023.
+These values are outdated compared to the 2026 polybutadiene metrics.
+
+## 2023 Coefficient Specifications
+- Legacy CoR target: 0.72
+- Ground friction factor: 0.45
+- Rubber bounce decay rate: 2.14
+
+Warning: Do not use these parameters in the 2026 simulator. They are outdated.`,
+    type: 'markdown',
+    size: 450,
+    category: 'shelf-repetitive-bounce',
+    tags: ['Legacy', 'Physics', 'Outdated'],
+    createdAt: '2023-11-15T10:00:00Z',
+    updatedAt: '2023-11-15T10:00:00Z',
+    isFavorite: false,
+    isArchived: false,
+    customPreviewColor: '#9b2c2c',
+    ownerEmail: 'ahmedalbanna966@gmail.com',
+    permissions: [],
+    shareSettings: { isPublic: true, publicRole: 'editor' }
+  },
+  {
+    id: 'doc-contradiction-report',
+    title: 'Alternative Elastomer Friction Analysis',
+    content: `# Alternative Elastomer Friction Analysis
+
+This study claims that polybutadiene compounds are highly unstable and should NEVER be used for stable Coefficient of Restitution (CoR) simulations.
+Instead, we recommend using vulcanized silicon compounds which provide 100% stability.
+
+Contrary to other reports (such as our Elastic Ball Mechanics), our tests show that polybutadiene CoR decays rapidly at room temperature.`,
+    type: 'markdown',
+    size: 400,
+    category: 'shelf-repetitive-bounce',
+    tags: ['Physics', 'Elastomer', 'Contradiction'],
+    createdAt: '2026-06-18T10:00:00Z',
+    updatedAt: '2026-06-18T10:00:00Z',
+    isFavorite: false,
+    isArchived: false,
+    customPreviewColor: '#d97706',
+    ownerEmail: 'ahmedalbanna966@gmail.com',
+    permissions: [],
+    shareSettings: { isPublic: true, publicRole: 'editor' }
+  }
 ];

@@ -677,6 +677,147 @@ Return strictly valid JSON matching the requested schema.`;
     }
   });
 
+  // API endpoint for Proactive AI Suggestions (Smart alerts: outdated & contradictions)
+  app.post("/api/gemini/proactive-alerts", async (req: any, res: any) => {
+    try {
+      const { documents } = req.body;
+
+      const activeApiKey = process.env.GEMINI_API_KEY;
+      if (!activeApiKey) {
+        return res.status(500).json({ error: "Gemini API Key is not configured." });
+      }
+
+      if (!ai) {
+        ai = new GoogleGenAI({
+          apiKey: activeApiKey,
+          httpOptions: {
+            headers: { 'User-Agent': 'aistudio-build' }
+          }
+        });
+      }
+
+      if (!documents || !Array.isArray(documents)) {
+        return res.status(400).json({ error: "Missing or invalid documents array." });
+      }
+
+      // Format documents to feed as context for contradiction & outdated checks
+      const docsContext = documents.map((doc: any, index: number) => {
+        return `--- DOCUMENT ${index + 1} ---
+ID: ${doc.id}
+Title: ${doc.title}
+Category: ${doc.category}
+Tags: ${(doc.tags || []).join(", ")}
+Updated: ${doc.updatedAt || doc.createdAt}
+Content:
+${doc.content.slice(0, 3000)}
+------------------------`;
+      }).join("\n\n");
+
+      const systemInstruction = `You are a proactive intelligence engine designed to audit document workspaces and generate high-fidelity, actionable smart alerts.
+Analyze the provided document workspace to spot:
+1. Outdated Documents: Find files that are clearly older (e.g., from 2023/2024 or labeled 'legacy') or whose content is deprecated or superseded by newer documents (e.g., outdated coefficients or old specifications).
+2. Logical Contradictions: Spot absolute technical contradictions, conflicting values, or competing strategies between any two documents (e.g. one saying polybutadiene is stable, another saying it is unstable; or conflicting project release metrics/dates).
+
+For each issue detected, provide a descriptive alert.
+Format the output strictly as valid JSON according to the schema provided.`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3.5-flash",
+        contents: `Audit the following document workspace and output smart alerts for outdated documents and logical contradictions:\n\n${docsContext}`,
+        config: {
+          systemInstruction,
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              alerts: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    id: { type: Type.STRING, description: "Unique alert slug or ID, e.g. alert-outdated-xyz" },
+                    type: { type: Type.STRING, description: "Must be 'outdated' or 'contradiction'" },
+                    title: { type: Type.STRING, description: "Short human-friendly title of the alert" },
+                    description: { type: Type.STRING, description: "Detailed description of the issue" },
+                    affectedDocIds: {
+                      type: Type.ARRAY,
+                      items: { type: Type.STRING },
+                      description: "List of document IDs related to this alert"
+                    },
+                    topic: { type: Type.STRING, description: "The overarching topic, e.g. Elastomer CoR, Product Parity, Release Goals" },
+                    suggestedAction: { type: Type.STRING, description: "Clear actionable step the user can take to resolve this" }
+                  },
+                  required: ["id", "type", "title", "description", "affectedDocIds", "topic", "suggestedAction"]
+                }
+              }
+            },
+            required: ["alerts"]
+          }
+        }
+      });
+
+      const data = JSON.parse(response.text || "{}");
+      res.json(data);
+
+    } catch (error: any) {
+      console.error("Proactive Alerts API Error:", error);
+      res.status(500).json({ error: error.message || "An error occurred during proactive alerts generation." });
+    }
+  });
+
+  // API endpoint for Automated Weekly Achievements Summary
+  app.post("/api/gemini/weekly-summary", async (req: any, res: any) => {
+    try {
+      const { documents, activities } = req.body;
+
+      const activeApiKey = process.env.GEMINI_API_KEY;
+      if (!activeApiKey) {
+        return res.status(500).json({ error: "Gemini API Key is not configured." });
+      }
+
+      if (!ai) {
+        ai = new GoogleGenAI({
+          apiKey: activeApiKey,
+          httpOptions: {
+            headers: { 'User-Agent': 'aistudio-build' }
+          }
+        });
+      }
+
+      const docContext = (documents || []).map((d: any) => `- "${d.title}" (${d.type}, Category: ${d.category}, Size: ${d.size} bytes)`).join("\n");
+      const activityContext = (activities || []).slice(0, 50).map((a: any) => `[${a.timestamp}] Action: ${a.action} on Document: "${a.documentTitle}"`).join("\n");
+
+      const prompt = `You are an elite productivity analyst. Generate a beautifully formatted and comprehensive "Weekly Achievements & Output Report" summarizing the user's document management output.
+      
+      Review the active workspace files:
+      ${docContext}
+      
+      And review the chronological activity feed (latest accomplishments first):
+      ${activityContext}
+      
+      Generate a professional, high-fidelity report with these exact styled sections:
+      1. 🏆 Executive Overview: An elegant summary of the weekly productivity and progress.
+      2. ⚙️ Active Output Breakdown: Analyze active work trends (revisions committed, file formats introduced, categories expanded).
+      3. 📊 Space & Composition Impact: Summarize content footprint shifts and tag density.
+      4. 🔮 Recommendations for Next Week: Intelligent, forward-looking suggestions based on the user's activity pace.
+      
+      Present the response in clean, spacious, printer-friendly Markdown. Use professional headers, bullet lists, bold highlights, and tables if useful. Keep it motivating, precise, and visually impeccable.`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3.5-flash",
+        contents: prompt,
+      });
+
+      res.json({
+        summary: response.text || "No summary was generated."
+      });
+
+    } catch (error: any) {
+      console.error("Weekly Summary API Error:", error);
+      res.status(500).json({ error: error.message || "An error occurred during weekly summary generation." });
+    }
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
