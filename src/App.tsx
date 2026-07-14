@@ -27,7 +27,8 @@ import {
   Cpu,
   Loader2,
   Shield,
-  Presentation
+  Presentation,
+  Code2
 } from 'lucide-react';
 
 import JSZip from 'jszip';
@@ -48,6 +49,7 @@ import ProactiveInsights from './components/ProactiveInsights';
 import SmartBackup from './components/SmartBackup';
 import PresentationWorkspace from './components/PresentationWorkspace';
 import AIAutomations from './components/AIAutomations';
+import LiteIDE from './components/LiteIDE';
 
 export default function App() {
   // --- Active Persona Session State ---
@@ -59,7 +61,7 @@ export default function App() {
   const [activities, setActivities] = useState<ActivityLog[]>([]);
 
   // --- Workspace Filters & Navigation ---
-  const [activeTab, setActiveTab] = useState<'shelves' | 'all' | 'favorites' | 'trash' | 'chat' | 'graph' | 'diagrams' | 'insights' | 'backup' | 'presentation' | 'automations'>('shelves');
+  const [activeTab, setActiveTab] = useState<'shelves' | 'all' | 'favorites' | 'trash' | 'chat' | 'graph' | 'diagrams' | 'insights' | 'backup' | 'presentation' | 'automations' | 'ide'>('shelves');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
 
@@ -1374,6 +1376,21 @@ Enter standard paragraphs or lists...`,
           </button>
 
           <button
+            id="tab-ide"
+            onClick={() => { setActiveTab('ide'); setSelectedTag(null); }}
+            className={`w-full text-left font-medium text-xs px-3 py-2 rounded-xl transition-all flex items-center justify-between cursor-pointer ${
+              activeTab === 'ide' 
+                ? 'bg-indigo-50 text-indigo-700 font-semibold' 
+                : 'text-gray-500 hover:bg-gray-50 hover:text-gray-800'
+            }`}
+          >
+            <span className="flex items-center gap-2">
+              <Code2 className="h-4 w-4 text-indigo-500" /> Lite IDE Workstation
+            </span>
+            <span className="font-mono text-[9px] bg-indigo-100 text-indigo-800 font-bold border border-indigo-200 rounded px-1 py-0.2">LITE</span>
+          </button>
+
+          <button
             id="tab-trash"
             onClick={() => { setActiveTab('trash'); setSelectedTag(null); }}
             className={`w-full text-left font-medium text-xs px-3 py-2 rounded-xl transition-all flex items-center justify-between cursor-pointer ${
@@ -1615,7 +1632,17 @@ Enter standard paragraphs or lists...`,
 
         {/* 4. MAIN ACTION SPACE */}
         <div id="workspace-action-space" className="flex-1 flex flex-col">
-          {activeTab === 'automations' ? (
+          {activeTab === 'ide' ? (
+            <LiteIDE
+              documents={documents}
+              shelves={shelves}
+              onSaveDoc={handleSaveDocEdits}
+              onAddDocToShelf={(title, content, type, shelfId) => {
+                handleUploadDoc(title, content, type as any, shelfId, new Blob([content]).size);
+              }}
+              currentUserEmail={currentUserEmail}
+            />
+          ) : activeTab === 'automations' ? (
             <AIAutomations
               documents={documents}
               shelves={shelves}
