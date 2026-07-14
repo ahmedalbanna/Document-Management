@@ -24,8 +24,10 @@ interface VideoEditorProps {
 
 interface VideoMarker {
   id: string;
-  timestamp: number;
+  timestamp: number;      // Start time in seconds
+  endTime?: number;        // Optional End time in seconds
   note: string;
+  category?: 'General' | 'Analysis' | 'Milestone' | 'Issue';
 }
 
 const DEFAULT_VIDEO = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4";
@@ -85,6 +87,26 @@ export default function VideoEditor({ content, onChange, title }: VideoEditorPro
   // Video annotations/markers
   const [markers, setMarkers] = useState<VideoMarker[]>([]);
   const [newNote, setNewNote] = useState<string>('');
+  const [isSegment, setIsSegment] = useState<boolean>(false);
+  const [markerStartTime, setMarkerStartTime] = useState<number>(0);
+  const [markerEndTime, setMarkerEndTime] = useState<number>(0);
+  const [markerCategory, setMarkerCategory] = useState<'General' | 'Analysis' | 'Milestone' | 'Issue'>('General');
+
+  // Editing state
+  const [editingMarkerId, setEditingMarkerId] = useState<string | null>(null);
+  const [editingNote, setEditingNote] = useState<string>('');
+  const [editingStartTime, setEditingStartTime] = useState<number>(0);
+  const [editingEndTime, setEditingEndTime] = useState<number>(0);
+  const [editingIsSegment, setEditingIsSegment] = useState<boolean>(false);
+  const [editingCategory, setEditingCategory] = useState<'General' | 'Analysis' | 'Milestone' | 'Issue'>('General');
+
+  // Sync defaults
+  useEffect(() => {
+    if (!isSegment) {
+      setMarkerStartTime(currentTime);
+      setMarkerEndTime(Math.min(duration || currentTime + 5, currentTime + 5));
+    }
+  }, [currentTime, isSegment, duration]);
 
   const videoRef = useRef<HTMLVideoElement>(null);
 
@@ -190,18 +212,53 @@ export default function VideoEditor({ content, onChange, title }: VideoEditorPro
     if (!newNote.trim()) return;
     const newMarker: VideoMarker = {
       id: `marker-${Date.now()}`,
-      timestamp: currentTime,
-      note: newNote.trim()
+      timestamp: isSegment ? markerStartTime : currentTime,
+      endTime: isSegment ? markerEndTime : undefined,
+      note: newNote.trim(),
+      category: markerCategory
     };
     const updatedMarkers = [...markers, newMarker].sort((a, b) => a.timestamp - b.timestamp);
     setMarkers(updatedMarkers);
     setNewNote('');
+    setIsSegment(false);
+    setMarkerCategory('General');
+    saveVideoState(updatedMarkers);
+  };
+
+  const startEditingMarker = (marker: VideoMarker) => {
+    setEditingMarkerId(marker.id);
+    setEditingNote(marker.note);
+    setEditingStartTime(marker.timestamp);
+    setEditingEndTime(marker.endTime || marker.timestamp + 5);
+    setEditingIsSegment(!!marker.endTime);
+    setEditingCategory(marker.category || 'General');
+  };
+
+  const handleUpdateMarker = (id: string) => {
+    if (!editingNote.trim()) return;
+    const updatedMarkers = markers.map(m => {
+      if (m.id === id) {
+        return {
+          ...m,
+          note: editingNote.trim(),
+          timestamp: editingStartTime,
+          endTime: editingIsSegment ? editingEndTime : undefined,
+          category: editingCategory
+        };
+      }
+      return m;
+    }).sort((a, b) => a.timestamp - b.timestamp);
+    setMarkers(updatedMarkers);
+    setEditingMarkerId(null);
     saveVideoState(updatedMarkers);
   };
 
   const handleDeleteMarker = (id: string) => {
     const updatedMarkers = markers.filter(m => m.id !== id);
     setMarkers(updatedMarkers);
+    if (editingMarkerId === id) {
+      setEditingMarkerId(null);
+    }
     saveVideoState(updatedMarkers);
   };
 
@@ -386,58 +443,228 @@ export default function VideoEditor({ content, onChange, title }: VideoEditorPro
               </span>
 
               {/* Insertion form */}
-              <div className="flex gap-1.5 shrink-0">
-                <input
-                  type="text"
-                  placeholder="Add annotation..."
-                  value={newNote}
-                  onChange={(e) => setNewNote(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') handleAddMarker();
-                  }}
-                  className="flex-grow bg-white border border-gray-200 rounded-xl px-3 py-1.5 text-xs focus:ring-1 focus:ring-indigo-550 focus:outline-none"
-                />
-                <button
-                  type="button"
-                  onClick={handleAddMarker}
-                  className="p-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl cursor-pointer shadow-sm transition-all flex items-center justify-center shrink-0"
-                >
-                  <Plus className="h-4 w-4" />
-                </button>
+              <div className="flex flex-col gap-2 p-2.5 bg-white border border-gray-150 rounded-xl shrink-0">
+                <div className="flex gap-1.5">
+                  <input
+                    type="text"
+                    placeholder="Add annotation note..."
+                    value={newNote}
+                    onChange={(e) => setNewNote(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleAddMarker();
+                    }}
+                    className="flex-grow bg-gray-50 border border-gray-250 rounded-lg px-2.5 py-1 text-xs focus:ring-1 focus:ring-indigo-550 focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleAddMarker}
+                    className="p-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg cursor-pointer shadow-sm transition-all flex items-center justify-center shrink-0"
+                    title="Add mark"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+
+                <div className="flex items-center justify-between text-[11px] text-gray-500 mt-1">
+                  <label className="flex items-center gap-1 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={isSegment}
+                      onChange={(e) => setIsSegment(e.target.checked)}
+                      className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 h-3.5 w-3.5"
+                    />
+                    <span className="font-medium text-gray-600">Precise Segment</span>
+                  </label>
+
+                  <select
+                    value={markerCategory}
+                    onChange={(e) => setMarkerCategory(e.target.value as any)}
+                    className="bg-transparent border-0 text-[10px] text-gray-600 focus:ring-0 py-0 pl-1 pr-6 cursor-pointer font-bold uppercase"
+                  >
+                    <option value="General">General ⚪</option>
+                    <option value="Analysis">Analysis 🟣</option>
+                    <option value="Milestone">Milestone 🟢</option>
+                    <option value="Issue">Issue 🔴</option>
+                  </select>
+                </div>
+
+                {isSegment && (
+                  <div className="grid grid-cols-2 gap-2 mt-1 bg-gray-50 p-2 rounded-lg border border-gray-250/60">
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-[9px] text-gray-400 uppercase font-bold font-mono">Start (s)</span>
+                      <input
+                        type="number"
+                        step="0.5"
+                        min="0"
+                        max={duration || 100}
+                        value={markerStartTime}
+                        onChange={(e) => setMarkerStartTime(Math.max(0, parseFloat(e.target.value) || 0))}
+                        className="w-full bg-white border border-gray-200 rounded px-1.5 py-0.5 text-[11px] font-mono text-center"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-[9px] text-gray-400 uppercase font-bold font-mono">End (s)</span>
+                      <input
+                        type="number"
+                        step="0.5"
+                        min="0"
+                        max={duration || 100}
+                        value={markerEndTime}
+                        onChange={(e) => setMarkerEndTime(Math.max(0, parseFloat(e.target.value) || 0))}
+                        className="w-full bg-white border border-gray-200 rounded px-1.5 py-0.5 text-[11px] font-mono text-center"
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Markers List */}
               <div className="flex-grow overflow-y-auto pr-0.5 [scrollbar-width:thin]">
                 {markers.length > 0 ? (
-                  markers.map((marker) => (
-                    <div
-                      key={marker.id}
-                      className="p-2 bg-white border border-gray-150 hover:border-indigo-150 rounded-xl flex items-start gap-2.5 transition-all text-left group mb-2"
-                    >
-                      <button
-                        type="button"
-                        onClick={() => handleSeekToMarker(marker.timestamp)}
-                        className="mt-0.5 p-1 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 rounded-lg text-[9px] font-mono font-bold flex items-center gap-0.5 shrink-0 transition-colors"
-                        title="Seek to time"
-                      >
-                        <Clock className="h-2.5 w-2.5" />
-                        {formatTime(marker.timestamp)}
-                      </button>
-                      
-                      <div className="flex-grow min-w-0 flex flex-col justify-center">
-                        <p className="text-xs text-gray-700 leading-normal break-words">{marker.note}</p>
-                      </div>
+                  markers.map((marker) => {
+                    if (editingMarkerId === marker.id) {
+                      return (
+                        <div key={marker.id} className="p-3 bg-indigo-50/55 border border-indigo-200 rounded-xl flex flex-col gap-2.5 text-left mb-2.5">
+                          <span className="text-[9px] font-bold text-indigo-750 uppercase tracking-wider font-mono">Edit Annotation</span>
+                          <input
+                            type="text"
+                            value={editingNote}
+                            onChange={(e) => setEditingNote(e.target.value)}
+                            className="bg-white border border-gray-200 rounded-lg px-2 py-1.5 text-xs focus:ring-1 focus:ring-indigo-550 focus:outline-none"
+                          />
+                          
+                          <div className="flex items-center justify-between text-[11px] text-gray-500">
+                            <label className="flex items-center gap-1 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={editingIsSegment}
+                                onChange={(e) => setEditingIsSegment(e.target.checked)}
+                                className="rounded border-gray-300 text-indigo-600 h-3.5 w-3.5"
+                              />
+                              <span className="font-medium">Is Segment</span>
+                            </label>
 
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteMarker(marker.id)}
-                        className="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all cursor-pointer shrink-0"
-                        title="Delete annotation"
+                            <select
+                              value={editingCategory}
+                              onChange={(e) => setEditingCategory(e.target.value as any)}
+                              className="bg-transparent border-0 text-[10px] text-gray-600 focus:ring-0 py-0 pl-1 pr-6 cursor-pointer font-bold uppercase"
+                            >
+                              <option value="General">General ⚪</option>
+                              <option value="Analysis">Analysis 🟣</option>
+                              <option value="Milestone">Milestone 🟢</option>
+                              <option value="Issue">Issue 🔴</option>
+                            </select>
+                          </div>
+
+                          {editingIsSegment && (
+                            <div className="grid grid-cols-2 gap-1.5 bg-white p-1.5 rounded-lg border border-gray-200/60">
+                              <div className="flex flex-col gap-0.5">
+                                <span className="text-[8px] text-gray-400 uppercase font-mono">Start (s)</span>
+                                <input
+                                  type="number"
+                                  step="0.5"
+                                  value={editingStartTime}
+                                  onChange={(e) => setEditingStartTime(parseFloat(e.target.value) || 0)}
+                                  className="w-full bg-gray-50 border border-gray-200 rounded px-1 py-0.5 text-[10px] font-mono text-center"
+                                />
+                              </div>
+                              <div className="flex flex-col gap-0.5">
+                                <span className="text-[8px] text-gray-400 uppercase font-mono">End (s)</span>
+                                <input
+                                  type="number"
+                                  step="0.5"
+                                  value={editingEndTime}
+                                  onChange={(e) => setEditingEndTime(parseFloat(e.target.value) || 0)}
+                                  className="w-full bg-gray-50 border border-gray-200 rounded px-1 py-0.5 text-[10px] font-mono text-center"
+                                />
+                              </div>
+                            </div>
+                          )}
+
+                          <div className="flex gap-1.5 justify-end mt-1 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => setEditingMarkerId(null)}
+                              className="px-2 py-1 text-[10px] font-bold text-gray-500 hover:text-gray-700 bg-white border border-gray-200 rounded-lg cursor-pointer"
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleUpdateMarker(marker.id)}
+                              className="px-2.5 py-1 text-[10px] font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg cursor-pointer"
+                            >
+                              Save
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    const catStyles = {
+                      General: 'border-gray-200 bg-white hover:border-gray-300',
+                      Analysis: 'border-purple-200 bg-purple-50/10 hover:border-purple-300 hover:bg-purple-50/20',
+                      Milestone: 'border-emerald-200 bg-emerald-50/10 hover:border-emerald-300 hover:bg-emerald-50/20',
+                      Issue: 'border-rose-200 bg-rose-50/10 hover:border-rose-300 hover:bg-rose-50/20',
+                    };
+
+                    const catBadge = {
+                      General: 'bg-gray-100 text-gray-700',
+                      Analysis: 'bg-purple-100 text-purple-700',
+                      Milestone: 'bg-emerald-100 text-emerald-700',
+                      Issue: 'bg-rose-100 text-rose-700',
+                    };
+
+                    const catStyle = catStyles[marker.category || 'General'];
+                    const badgeStyle = catBadge[marker.category || 'General'];
+
+                    return (
+                      <div
+                        key={marker.id}
+                        className={`p-2.5 border rounded-xl flex flex-col gap-1.5 transition-all text-left group mb-2.5 ${catStyle}`}
                       >
-                        <Trash2 className="h-3 w-3" />
-                      </button>
-                    </div>
-                  ))
+                        <div className="flex items-center justify-between gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => handleSeekToMarker(marker.timestamp)}
+                            className="p-1 bg-gray-50 hover:bg-indigo-100 hover:text-indigo-700 text-gray-700 border border-gray-150 rounded-lg text-[9px] font-mono font-bold flex items-center gap-0.5 shrink-0 transition-all"
+                            title="Seek to segment start"
+                          >
+                            <Clock className="h-2.5 w-2.5" />
+                            {formatTime(marker.timestamp)}
+                            {marker.endTime && ` ➜ ${formatTime(marker.endTime)}`}
+                          </button>
+
+                          <div className="flex items-center gap-1 font-mono text-[8px]">
+                            <span className={`font-bold px-1.5 py-0.5 rounded ${badgeStyle}`}>
+                              {(marker.category || 'General').toUpperCase()}
+                            </span>
+                            
+                            <button
+                              type="button"
+                              onClick={() => startEditingMarker(marker)}
+                              className="opacity-0 group-hover:opacity-100 p-0.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-md transition-all cursor-pointer"
+                              title="Edit timestamp or text"
+                            >
+                              <Plus className="h-3 w-3 rotate-45" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteMarker(marker.id)}
+                              className="opacity-0 group-hover:opacity-100 p-0.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-all cursor-pointer"
+                              title="Delete annotation"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </button>
+                          </div>
+                        </div>
+
+                        <p className="text-[11.5px] text-gray-700 leading-relaxed break-words pl-0.5 font-medium">
+                          {marker.note}
+                        </p>
+                      </div>
+                    );
+                  })
                 ) : (
                   <div className="py-8 text-center text-gray-400 italic text-xs border border-dashed border-gray-200 rounded-xl bg-white/50">
                     No annotations added yet.

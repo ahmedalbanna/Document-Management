@@ -12,7 +12,8 @@ import {
   Sparkles, 
   Image as ImageIcon,
   Check,
-  Type
+  Type,
+  Crop as CropIcon
 } from 'lucide-react';
 
 interface ImageEditorProps {
@@ -41,7 +42,71 @@ const PRESET_IMAGES = [
 
 export default function ImageEditor({ content, onChange, title }: ImageEditorProps) {
   const [imageSrc, setImageSrc] = useState<string>('');
-  const [tool, setTool] = useState<'draw' | 'filters' | 'presets' | 'ocr'>('draw');
+  const [tool, setTool] = useState<'draw' | 'crop' | 'filters' | 'presets' | 'ocr'>('draw');
+  
+  // Crop states
+  const [cropX, setCropX] = useState<number>(10);
+  const [cropY, setCropY] = useState<number>(10);
+  const [cropWidth, setCropWidth] = useState<number>(80);
+  const [cropHeight, setCropHeight] = useState<number>(80);
+
+  const handleExecuteCrop = () => {
+    const canvas = canvasRef.current;
+    const img = imageObjRef.current;
+    if (!canvas || !img) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const width = img.naturalWidth || img.width || 400;
+    const height = img.naturalHeight || img.height || 300;
+
+    const cx = (cropX / 100) * width;
+    const cy = (cropY / 100) * height;
+    const cw = (cropWidth / 100) * width;
+    const ch = (cropHeight / 100) * height;
+
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = cw;
+    tempCanvas.height = ch;
+    const tempCtx = tempCanvas.getContext('2d');
+    if (!tempCtx) return;
+
+    const rawStateCanvas = document.createElement('canvas');
+    rawStateCanvas.width = width;
+    rawStateCanvas.height = height;
+    const rawCtx = rawStateCanvas.getContext('2d');
+    if (rawCtx) {
+      rawCtx.save();
+      rawCtx.translate(width / 2, height / 2);
+      rawCtx.rotate((rotation * Math.PI) / 180);
+      rawCtx.scale(flipH ? -1 : 1, flipV ? -1 : 1);
+      rawCtx.translate(-width / 2, -height / 2);
+      rawCtx.filter = `
+        brightness(${brightness}%)
+        contrast(${contrast}%)
+        grayscale(${grayscale}%)
+        sepia(${sepia}%)
+        hue-rotate(${hueRotate}deg)
+        blur(${blur}px)
+      `;
+      rawCtx.drawImage(img, 0, 0, width, height);
+      rawCtx.restore();
+
+      if (drawingHistory.length > 0) {
+        rawCtx.putImageData(drawingHistory[drawingHistory.length - 1], 0, 0);
+      }
+      
+      tempCtx.drawImage(rawStateCanvas, cx, cy, cw, ch, 0, 0, cw, ch);
+    }
+
+    const croppedDataUrl = tempCanvas.toDataURL('image/png');
+    setImageSrc(croppedDataUrl);
+    setCropX(10);
+    setCropY(10);
+    setCropWidth(80);
+    setCropHeight(80);
+    setTool('draw');
+  };
   
   // OCR states
   const [isOcrLoading, setIsOcrLoading] = useState<boolean>(false);
@@ -144,7 +209,7 @@ export default function ImageEditor({ content, onChange, title }: ImageEditorPro
   // Redraw when layout modifiers change
   useEffect(() => {
     redrawCanvas();
-  }, [brightness, contrast, grayscale, sepia, hueRotate, blur, rotation, flipH, flipV]);
+  }, [brightness, contrast, grayscale, sepia, hueRotate, blur, rotation, flipH, flipV, tool, cropX, cropY, cropWidth, cropHeight]);
 
   const redrawCanvas = () => {
     const canvas = canvasRef.current;
@@ -188,6 +253,44 @@ export default function ImageEditor({ content, onChange, title }: ImageEditorPro
     if (drawingHistory.length > 0) {
       const lastStroke = drawingHistory[drawingHistory.length - 1];
       ctx.putImageData(lastStroke, 0, 0);
+    }
+
+    // Draw crop overlays if crop tool is active
+    if (tool === 'crop') {
+      const cx = (cropX / 100) * width;
+      const cy = (cropY / 100) * height;
+      const cw = (cropWidth / 100) * width;
+      const ch = (cropHeight / 100) * height;
+
+      ctx.save();
+      
+      // Draw semi-transparent overlay
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+      
+      // Top overlay
+      ctx.fillRect(0, 0, width, cy);
+      // Bottom overlay
+      ctx.fillRect(0, cy + ch, width, height - (cy + ch));
+      // Left overlay
+      ctx.fillRect(0, cy, cx, ch);
+      // Right overlay
+      ctx.fillRect(cx + cw, cy, width - (cx + cw), ch);
+
+      // Crop box border
+      ctx.strokeStyle = '#6366f1';
+      ctx.lineWidth = Math.max(2, width / 200);
+      ctx.setLineDash([6, 4]);
+      ctx.strokeRect(cx, cy, cw, ch);
+
+      // Corner handles
+      ctx.fillStyle = '#6366f1';
+      const handleSize = Math.max(8, width / 50);
+      ctx.fillRect(cx - handleSize / 2, cy - handleSize / 2, handleSize, handleSize);
+      ctx.fillRect(cx + cw - handleSize / 2, cy - handleSize / 2, handleSize, handleSize);
+      ctx.fillRect(cx - handleSize / 2, cy + ch - handleSize / 2, handleSize, handleSize);
+      ctx.fillRect(cx + cw - handleSize / 2, cy + ch - handleSize / 2, handleSize, handleSize);
+
+      ctx.restore();
     }
   };
 
@@ -390,7 +493,7 @@ export default function ImageEditor({ content, onChange, title }: ImageEditorPro
           <button
             type="button"
             onClick={() => setTool('draw')}
-            className={`flex-1 py-1 px-1 text-[11px] font-bold rounded-lg transition-all flex items-center justify-center gap-0.5 cursor-pointer ${
+            className={`flex-1 py-1 px-0.5 text-[10px] sm:text-[11px] font-bold rounded-lg transition-all flex items-center justify-center gap-0.5 cursor-pointer ${
               tool === 'draw' ? 'bg-white text-gray-900 shadow-xs' : 'text-gray-500 hover:text-gray-850'
             }`}
           >
@@ -398,8 +501,17 @@ export default function ImageEditor({ content, onChange, title }: ImageEditorPro
           </button>
           <button
             type="button"
+            onClick={() => setTool('crop')}
+            className={`flex-1 py-1 px-0.5 text-[10px] sm:text-[11px] font-bold rounded-lg transition-all flex items-center justify-center gap-0.5 cursor-pointer ${
+              tool === 'crop' ? 'bg-white text-gray-900 shadow-xs' : 'text-gray-500 hover:text-gray-850'
+            }`}
+          >
+            <CropIcon className="h-3 w-3" /> Crop
+          </button>
+          <button
+            type="button"
             onClick={() => setTool('filters')}
-            className={`flex-1 py-1 px-1 text-[11px] font-bold rounded-lg transition-all flex items-center justify-center gap-0.5 cursor-pointer ${
+            className={`flex-1 py-1 px-0.5 text-[10px] sm:text-[11px] font-bold rounded-lg transition-all flex items-center justify-center gap-0.5 cursor-pointer ${
               tool === 'filters' ? 'bg-white text-gray-900 shadow-xs' : 'text-gray-500 hover:text-gray-850'
             }`}
           >
@@ -408,7 +520,7 @@ export default function ImageEditor({ content, onChange, title }: ImageEditorPro
           <button
             type="button"
             onClick={() => setTool('presets')}
-            className={`flex-1 py-1 px-1 text-[11px] font-bold rounded-lg transition-all flex items-center justify-center gap-0.5 cursor-pointer ${
+            className={`flex-1 py-1 px-0.5 text-[10px] sm:text-[11px] font-bold rounded-lg transition-all flex items-center justify-center gap-0.5 cursor-pointer ${
               tool === 'presets' ? 'bg-white text-gray-900 shadow-xs' : 'text-gray-500 hover:text-gray-850'
             }`}
           >
@@ -417,7 +529,7 @@ export default function ImageEditor({ content, onChange, title }: ImageEditorPro
           <button
             type="button"
             onClick={() => setTool('ocr')}
-            className={`flex-1 py-1 px-1 text-[11px] font-bold rounded-lg transition-all flex items-center justify-center gap-0.5 cursor-pointer ${
+            className={`flex-1 py-1 px-0.5 text-[10px] sm:text-[11px] font-bold rounded-lg transition-all flex items-center justify-center gap-0.5 cursor-pointer ${
               tool === 'ocr' ? 'bg-white text-gray-900 shadow-xs' : 'text-gray-500 hover:text-gray-850'
             }`}
           >
@@ -428,6 +540,77 @@ export default function ImageEditor({ content, onChange, title }: ImageEditorPro
         {/* Dynamic Panels */}
         <div className="flex-grow overflow-y-auto pr-0.5 max-h-[48vh] xl:max-h-none flex flex-col justify-start">
           
+          {tool === 'crop' && (
+            <div className="flex flex-col gap-4">
+              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Crop Region Settings</span>
+              
+              <div className="flex flex-col gap-3">
+                <div className="flex flex-col gap-1">
+                  <div className="flex justify-between text-[11px] text-gray-500 font-medium">
+                    <span>X Position</span>
+                    <span className="font-mono">{cropX}%</span>
+                  </div>
+                  <input
+                    type="range" min="0" max="90" value={cropX}
+                    onChange={(e) => setCropX(parseInt(e.target.value))}
+                    className="w-full accent-indigo-600 bg-gray-200 rounded-lg h-1"
+                  />
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <div className="flex justify-between text-[11px] text-gray-500 font-medium">
+                    <span>Y Position</span>
+                    <span className="font-mono">{cropY}%</span>
+                  </div>
+                  <input
+                    type="range" min="0" max="90" value={cropY}
+                    onChange={(e) => setCropY(parseInt(e.target.value))}
+                    className="w-full accent-indigo-600 bg-gray-200 rounded-lg h-1"
+                  />
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <div className="flex justify-between text-[11px] text-gray-500 font-medium">
+                    <span>Width</span>
+                    <span className="font-mono">{cropWidth}%</span>
+                  </div>
+                  <input
+                    type="range" min="10" max="100" value={cropWidth}
+                    onChange={(e) => setCropWidth(parseInt(e.target.value))}
+                    className="w-full accent-indigo-600 bg-gray-200 rounded-lg h-1"
+                  />
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <div className="flex justify-between text-[11px] text-gray-500 font-medium">
+                    <span>Height</span>
+                    <span className="font-mono">{cropHeight}%</span>
+                  </div>
+                  <input
+                    type="range" min="10" max="100" value={cropHeight}
+                    onChange={(e) => setCropHeight(parseInt(e.target.value))}
+                    className="w-full accent-indigo-600 bg-gray-200 rounded-lg h-1"
+                  />
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleExecuteCrop}
+                className="w-full mt-2 py-2 px-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-md shadow-indigo-600/10 cursor-pointer transition-all"
+              >
+                <CropIcon className="h-3.5 w-3.5" /> Execute Crop
+              </button>
+
+              <div className="bg-indigo-50/50 border border-indigo-100 p-3 rounded-xl mt-2 flex flex-col gap-1 text-[11px] text-indigo-750">
+                <span className="font-semibold flex items-center gap-1">
+                  <CropIcon className="h-3 w-3" /> Area Selection
+                </span>
+                <p className="leading-relaxed">Use the sliders above to position and size the crop box overlay shown in the viewport. Click 'Execute Crop' to crop the image.</p>
+              </div>
+            </div>
+          )}
+
           {tool === 'draw' && (
             <div className="flex flex-col gap-4">
               <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Paint Brush Configurations</span>
