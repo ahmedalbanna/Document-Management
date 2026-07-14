@@ -1119,7 +1119,7 @@ Enter standard paragraphs or lists...`,
   };
 
   // --- Tag filter operations ---
-  const allTags = Array.from(
+  const allTags: string[] = Array.from(
     new Set(documents.filter(d => !d.isArchived).flatMap(d => d.tags))
   );
 
@@ -1141,7 +1141,9 @@ Enter standard paragraphs or lists...`,
 
     // 3. Filter by selected label tag
     if (selectedTag) {
-      baseDocs = baseDocs.filter(d => d.tags.includes(selectedTag));
+      baseDocs = baseDocs.filter(d => 
+        d.tags.some(t => t === selectedTag || t.startsWith(selectedTag + '/'))
+      );
     }
 
     // 4. Ranked prefix-matching Full-Text Search (FTS) vs Semantic Concept-Based Search
@@ -1405,8 +1407,15 @@ Enter standard paragraphs or lists...`,
                       : 'bg-gray-50 border-gray-200 text-gray-600 hover:border-gray-300'
                   }`}
                 >
-                  <Tag className="h-2.5 w-2.5" />
-                  {tag}
+                  <Tag className="h-2.5 w-2.5 flex-shrink-0" />
+                  <span className="flex flex-wrap items-center">
+                    {tag.includes('/') ? tag.split('/').map((part, pIdx) => (
+                      <React.Fragment key={pIdx}>
+                        {pIdx > 0 && <span className="mx-0.5 opacity-40 font-normal">›</span>}
+                        <span>{part}</span>
+                      </React.Fragment>
+                    )) : tag}
+                  </span>
                 </button>
               ))}
             </div>

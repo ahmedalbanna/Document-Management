@@ -96,10 +96,17 @@ export default function KnowledgeGraph({
 
   // Load calculated relationships from localStorage
   useEffect(() => {
-    const savedConnections = localStorage.getItem('doc_manager_implicit_connections');
-    const savedGaps = localStorage.getItem('doc_manager_knowledge_gaps');
-    if (savedConnections) setImplicitConnections(JSON.parse(savedConnections));
-    if (savedGaps) setKnowledgeGaps(JSON.parse(savedGaps));
+    const loadRelations = () => {
+      const savedConnections = localStorage.getItem('doc_manager_implicit_connections');
+      const savedGaps = localStorage.getItem('doc_manager_knowledge_gaps');
+      if (savedConnections) setImplicitConnections(JSON.parse(savedConnections));
+      if (savedGaps) setKnowledgeGaps(JSON.parse(savedGaps));
+    };
+    loadRelations();
+    window.addEventListener('doc_manager_relations_updated', loadRelations);
+    return () => {
+      window.removeEventListener('doc_manager_relations_updated', loadRelations);
+    };
   }, []);
 
   // --- Compute Graph Structure ---

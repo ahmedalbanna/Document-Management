@@ -20,7 +20,10 @@ import {
   Play,
   Zap,
   Users,
-  Lock
+  Lock,
+  RefreshCw,
+  Loader2,
+  Link as LinkIcon
 } from 'lucide-react';
 import { Document, Shelf, DocumentVersion } from '../types';
 import { computeLineDiff } from '../utils/diff';
@@ -75,6 +78,94 @@ export default function DocumentEditor({
   const [showSimulator, setShowSimulator] = useState<boolean>(initialShowSimulator);
   const [isConverting, setIsConverting] = useState<boolean>(false);
   const [showConvertMenu, setShowConvertMenu] = useState<boolean>(false);
+
+  // Zettelkasten Concept Backlinking Suite
+  const [implicitConns, setImplicitConns] = useState<any[]>([]);
+  const [isScanning, setIsScanning] = useState<boolean>(false);
+  const [scanError, setScanError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const loadConnections = () => {
+      const saved = localStorage.getItem('doc_manager_implicit_connections');
+      if (saved) {
+        setImplicitConns(JSON.parse(saved));
+      }
+    };
+    loadConnections();
+    window.addEventListener('doc_manager_relations_updated', loadConnections);
+    return () => {
+      window.removeEventListener('doc_manager_relations_updated', loadConnections);
+    };
+  }, [document.id]);
+
+  const handleRunProactiveScan = async () => {
+    setIsScanning(true);
+    setScanError(null);
+    try {
+      const activeDocs = documents.filter(d => !d.isArchived);
+      const response = await fetch('/api/gemini/knowledge-graph', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ documents: activeDocs })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to analyze connections.');
+      }
+
+      const data = await response.json();
+      const connections = data.connections || [];
+      const gaps = data.knowledgeGaps || [];
+
+      setImplicitConns(connections);
+      localStorage.setItem('doc_manager_implicit_connections', JSON.stringify(connections));
+      localStorage.setItem('doc_manager_knowledge_gaps', JSON.stringify(gaps));
+      
+      // Dispatch custom event to sync with other components
+      window.dispatchEvent(new Event('doc_manager_relations_updated'));
+    } catch (err: any) {
+      console.error(err);
+      setScanError(err.message || 'Error occurred during scan.');
+    } finally {
+      setIsScanning(false);
+    }
+  };
+
+  const handleInsertWikiLink = (titleToInsert: string) => {
+    if (isReadOnly) return;
+    const textarea = window.document.getElementById('editor-textarea') as HTMLTextAreaElement;
+    if (!textarea) {
+      // fallback if not in normal text mode
+      const textToAppend = `\n\nSee also: [[${titleToInsert}]]`;
+      handleContentChange(content + textToAppend);
+      return;
+    }
+    
+    const cursor = textarea.selectionStart;
+    const before = content.slice(0, cursor);
+    const after = content.slice(cursor);
+    const insertText = `[[${titleToInsert}]]`;
+    
+    handleContentChange(before + insertText + after);
+    setTimeout(() => {
+      textarea.focus();
+      textarea.setSelectionRange(cursor + insertText.length, cursor + insertText.length);
+    }, 50);
+  };
+
+  const currentImplicitConns = implicitConns.filter(conn => {
+    return conn.sourceId === document.id || conn.targetId === document.id;
+  });
+
+  const smartBacklinks = currentImplicitConns.map(conn => {
+    const otherId = conn.sourceId === document.id ? conn.targetId : conn.sourceId;
+    const otherDoc = documents.find(d => d.id === otherId && !d.isArchived);
+    return {
+      conn,
+      otherDoc
+    };
+  }).filter(item => item.otherDoc !== undefined) as { conn: any; otherDoc: Document }[];
 
   const getDocumentUserRole = (): 'owner' | 'editor' | 'viewer' | 'none' => {
     const userEmail = currentUserEmail || 'ahmedalbanna966@gmail.com';
@@ -570,7 +661,7 @@ export default function DocumentEditor({
 
   const handleAddTag = (e: React.FormEvent) => {
     e.preventDefault();
-    const cleanTag = tagInput.trim().replace(/[^a-zA-Z0-9-]/g, '');
+    const cleanTag = tagInput.trim().replace(/[^a-zA-Z0-9-/]/g, '');
     if (cleanTag && !tags.includes(cleanTag)) {
       setTags([...tags, cleanTag]);
     }
@@ -1722,15 +1813,17 @@ export default function DocumentEditor({
                 })()}
               </div>
             ) : activeSidebarTab === 'backlinks' ? (
-              <div className="flex flex-col gap-3 flex-grow overflow-hidden select-none">
-                <div className="flex flex-col">
+              <div className="flex flex-col gap-3 flex-grow overflow-hidden select-none h-full">
+                
+                {/* 1. Incoming References */}
+                <div className="flex flex-col shrink-0">
                   <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Incoming References</span>
-                  <p className="text-[10px] text-gray-450 leading-tight mt-1">
-                    Other documents that link back to this card using wiki-links. Click on any to transition instantly.
+                  <p className="text-[10px] text-gray-450 leading-tight mt-0.5">
+                    Other documents that link back to this card using wiki-links.
                   </p>
                 </div>
 
-                <div className="flex-1 overflow-y-auto pr-1 py-1 flex flex-col gap-2.5 max-h-[52vh] [scrollbar-width:thin]">
+                <div className="overflow-y-auto pr-1 py-1 flex flex-col gap-2 max-h-[25vh] min-h-[100px] [scrollbar-width:thin] border-b border-gray-150/80 pb-2.5 shrink-0">
                   {backlinks.length > 0 ? (
                     backlinks.map((linkedDoc) => {
                       // Generate a neat excerpt showing the context where this wiki link is located
@@ -1749,42 +1842,113 @@ export default function DocumentEditor({
                         <div
                           key={linkedDoc.id}
                           onClick={() => onOpenDoc(linkedDoc)}
-                          className="p-3 rounded-2xl border border-gray-200/80 hover:border-indigo-300 hover:ring-2 hover:ring-indigo-50 bg-white transition-all flex flex-col gap-1.5 cursor-pointer"
+                          className="p-2.5 rounded-xl border border-gray-200/80 hover:border-indigo-300 hover:ring-2 hover:ring-indigo-50 bg-white transition-all flex flex-col gap-1 cursor-pointer"
                         >
-                          <div className="flex items-center justify-between gap-1.5">
+                          <div className="flex items-center justify-between gap-1">
                             <span className="text-xs font-bold text-gray-800 hover:text-indigo-650 truncate">
                               {linkedDoc.title}
                             </span>
                             <span className="text-[9px] font-mono text-gray-400">
-                              {(linkedDoc.size / 1024).toFixed(2)} KB
+                              {(linkedDoc.size / 1024).toFixed(1)} KB
                             </span>
                           </div>
                           
-                          <p className="text-[10px] text-gray-500 font-mono italic leading-normal line-clamp-2">
+                          <p className="text-[10px] text-gray-500 font-mono italic leading-normal line-clamp-1">
                             {excerpt}
                           </p>
-                          
-                          <div className="flex gap-2 items-center mt-1 pt-1.5 border-t border-dashed border-gray-100 select-none">
-                            <span className="text-[9px] bg-indigo-50 text-indigo-750 px-1.5 py-0.5 rounded font-semibold capitalize">
-                              {linkedDoc.type}
-                            </span>
-                            <span className="text-[9px] text-gray-400 font-mono ml-auto">
-                              Click to navigate
-                            </span>
-                          </div>
                         </div>
                       );
                     })
                   ) : (
-                    <div className="py-12 flex flex-col items-center justify-center text-center gap-2 select-none border border-dashed border-gray-250 bg-white/50 rounded-2xl p-4">
-                      <ExternalLink className="h-6 w-6 text-gray-300 stroke-[1.5]" />
-                      <div className="flex flex-col px-4">
-                        <span className="text-xs font-semibold text-gray-500">No backlinks found</span>
-                        <span className="text-[10px] text-gray-400 mt-1">
-                          Type <code className="font-mono bg-gray-100 px-1 py-0.5 rounded font-bold">[[</code> in other documents and select this document to link them.
-                        </span>
-                      </div>
+                    <div className="py-4 flex flex-col items-center justify-center text-center gap-1 select-none border border-dashed border-gray-200 bg-white/50 rounded-xl p-2">
+                      <span className="text-[10px] font-semibold text-gray-400">No incoming links</span>
                     </div>
+                  )}
+                </div>
+
+                {/* 2. AI Suggested Connections */}
+                <div className="flex flex-col gap-1 shrink-0 mt-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1">
+                      <Sparkles className="h-3 w-3 text-indigo-550 fill-current animate-pulse" /> AI Suggested Links
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleRunProactiveScan}
+                      disabled={isScanning}
+                      className="p-1 hover:bg-indigo-50 text-indigo-600 hover:text-indigo-800 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
+                      title="Proactively scan entire knowledge library with AI"
+                    >
+                      <RefreshCw className={`h-3 w-3 ${isScanning ? 'animate-spin' : ''}`} />
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-gray-450 leading-tight">
+                    AI highlights semantic connections and similar research across documents.
+                  </p>
+                </div>
+
+                <div className="flex-grow overflow-y-auto pr-1 py-1 flex flex-col gap-2 [scrollbar-width:thin] min-h-[150px]">
+                  {isScanning && (
+                    <div className="py-8 flex flex-col items-center justify-center text-center gap-2 bg-indigo-50/20 border border-indigo-100/40 rounded-xl px-4">
+                      <Loader2 className="h-5 w-5 text-indigo-550 animate-spin" />
+                      <span className="text-xs text-indigo-950 font-bold animate-pulse">Scanning library context...</span>
+                      <span className="text-[9px] text-indigo-500">Connecting similar thoughts across shelves</span>
+                    </div>
+                  )}
+
+                  {!isScanning && scanError && (
+                    <div className="p-2.5 text-[10px] text-red-600 bg-red-50 border border-red-150 rounded-xl">
+                      Failed to scan: {scanError}
+                    </div>
+                  )}
+
+                  {!isScanning && smartBacklinks.length > 0 ? (
+                    smartBacklinks.map(({ conn, otherDoc }) => (
+                      <div
+                        key={`${conn.sourceId}-${conn.targetId}`}
+                        onClick={() => onOpenDoc(otherDoc)}
+                        className="p-3 rounded-xl border border-indigo-100 bg-gradient-to-br from-indigo-50/15 to-white hover:border-indigo-300 hover:ring-2 hover:ring-indigo-50/50 transition-all flex flex-col gap-1.5 cursor-pointer relative group"
+                      >
+                        <div className="flex items-center justify-between gap-1.5">
+                          <span className="text-xs font-bold text-gray-800 hover:text-indigo-650 truncate max-w-[140px]">
+                            {otherDoc.title}
+                          </span>
+                          <span className="text-[9px] font-semibold bg-indigo-50 text-indigo-750 px-1.5 py-0.5 rounded-full shrink-0">
+                            {Math.round(conn.strength * 100)}% match
+                          </span>
+                        </div>
+                        
+                        <p className="text-[10px] text-gray-600 leading-normal bg-white/70 border border-indigo-50/40 p-2 rounded-lg">
+                          {conn.reason}
+                        </p>
+                        
+                        <div className="flex gap-2 items-center pt-1.5 select-none border-t border-dashed border-gray-100">
+                          <span className="text-[9px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded font-semibold capitalize shrink-0">
+                            {otherDoc.type}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleInsertWikiLink(otherDoc.title);
+                            }}
+                            className="text-[9px] font-semibold text-indigo-600 hover:text-indigo-800 hover:underline ml-auto flex items-center gap-0.5 cursor-pointer bg-white border border-gray-200 hover:border-indigo-200 px-1.5 py-0.5 rounded"
+                          >
+                            <LinkIcon className="h-2.5 w-2.5" /> Link This
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    !isScanning && (
+                      <div className="py-8 flex flex-col items-center justify-center text-center gap-1.5 border border-dashed border-gray-200 bg-white rounded-xl p-4 select-none">
+                        <Sparkles className="h-5 w-5 text-gray-300" />
+                        <span className="text-xs font-semibold text-gray-500">No suggested links</span>
+                        <p className="text-[9px] text-gray-400">
+                          Click the refresh icon above to trigger the AI concept scanning engine.
+                        </p>
+                      </div>
+                    )
                   )}
                 </div>
               </div>

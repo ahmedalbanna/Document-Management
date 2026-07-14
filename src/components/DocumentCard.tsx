@@ -23,7 +23,8 @@ import {
   Users,
   Lock,
   Eye,
-  Sparkles
+  Sparkles,
+  Tag
 } from 'lucide-react';
 import { Document, Shelf } from '../types';
 
@@ -423,6 +424,28 @@ export default function DocumentCard({
               </span>
             )}
           </div>
+
+          {/* Hierarchical Tags Display */}
+          {document.tags && document.tags.length > 0 && (
+            <div className="flex flex-wrap gap-1 mt-2 max-h-12 overflow-hidden select-none">
+              {document.tags.map(tag => (
+                <span 
+                  key={tag} 
+                  className="text-[9px] bg-gray-50 border border-gray-150 text-gray-500 font-medium px-1.5 py-0.5 rounded flex items-center gap-0.5"
+                >
+                  <Tag className="h-2 w-2 text-gray-400" />
+                  <span className="flex items-center">
+                    {tag.includes('/') ? tag.split('/').map((part, pIdx) => (
+                      <React.Fragment key={pIdx}>
+                        {pIdx > 0 && <span className="text-gray-300 mx-0.5">›</span>}
+                        <span>{part}</span>
+                      </React.Fragment>
+                    )) : tag}
+                  </span>
+                </span>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Footer details & core shelf operations */}
