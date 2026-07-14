@@ -1147,11 +1147,11 @@ export default function DocumentEditor({
               </div>
             ) : type === 'spreadsheet' ? (
               <div className="flex-1 p-6 overflow-y-auto">
-                <CsvEditor content={content} onChange={(newVal) => { if (isReadOnly) return; handleContentChange(newVal); }} title={title} />
+                <CsvEditor content={content} onChange={(newVal) => { if (isReadOnly) return; handleContentChange(newVal); }} title={title} documents={documents} onOpenDoc={onOpenDoc} />
               </div>
             ) : type === 'markdown' ? (
               <div className="flex-1 p-6 overflow-y-auto">
-                <MarkdownEditor content={content} onChange={(newVal) => { if (isReadOnly) return; handleContentChange(newVal); }} renderMarkdown={renderMarkdown} title={title} />
+                <MarkdownEditor content={content} onChange={(newVal) => { if (isReadOnly) return; handleContentChange(newVal); }} renderMarkdown={renderMarkdown} title={title} documents={documents} onOpenDoc={onOpenDoc} />
               </div>
             ) : type === 'video' ? (
               <div className="flex-1 p-6 overflow-y-auto">
