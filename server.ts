@@ -1295,6 +1295,240 @@ Provide a friendly, highly intelligent recovery response in Markdown.
     }
   });
 
+  // API endpoint for Built-in Writing Assistant
+  app.post("/api/gemini/writing-assistant", async (req: any, res: any) => {
+    try {
+      const { text, action, context } = req.body;
+
+      const activeApiKey = process.env.GEMINI_API_KEY;
+      if (!activeApiKey) {
+        return res.status(500).json({ error: "Gemini API Key is not configured." });
+      }
+
+      if (!ai) {
+        ai = new GoogleGenAI({
+          apiKey: activeApiKey,
+          httpOptions: {
+            headers: { 'User-Agent': 'aistudio-build' }
+          }
+        });
+      }
+
+      if (!text || !action) {
+        return res.status(400).json({ error: "Missing text or action for writing assistant." });
+      }
+
+      let prompt = "";
+      let isJson = false;
+
+      if (action === "continue") {
+        prompt = `You are an elite co-writer. Continue writing the following text naturally, picking up on the tone, technical density, style, and flow. Write 1-2 robust paragraphs that expand beautifully on the content.
+        Original Text:
+        """
+        ${text}
+        """
+        ${context ? `Additional style or focus direction from the user: "${context}"` : ""}`;
+      } else if (action === "formal-email") {
+        prompt = `You are a professional corporate communications expert. Convert the following text or key points into a beautifully formatted, highly polished, polite, and persuasive formal business email. Provide a subject line, clear paragraphs, bullet points if needed, and a professional sign-off.
+        Draft content:
+        """
+        ${text}
+        """
+        ${context ? `Additional direction: "${context}"` : ""}`;
+      } else if (action === "proofread") {
+        isJson = true;
+        prompt = `You are an elite grammarian, editor, and proofreader. Carefully review the following text. Correct spelling, grammar, punctuation, sentence flow, and clarity while maintaining the technical terminology and original meaning.
+        Text to proofread:
+        """
+        ${text}
+        """
+        ${context ? `Specific editing focus: "${context}"` : ""}`;
+      } else {
+        return res.status(400).json({ error: "Unsupported writing assistant action." });
+      }
+
+      let response;
+      if (isJson) {
+        response = await ai.models.generateContent({
+          model: "gemini-3.5-flash",
+          contents: prompt,
+          config: {
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                polishedText: { type: Type.STRING, description: "The complete, fully polished version of the text." },
+                corrections: {
+                  type: Type.ARRAY,
+                  items: { type: Type.STRING },
+                  description: "List of brief bullet points describing what was corrected and why."
+                }
+              },
+              required: ["polishedText", "corrections"]
+            }
+          }
+        });
+        const data = JSON.parse(response.text || "{}");
+        res.json(data);
+      } else {
+        response = await ai.models.generateContent({
+          model: "gemini-3.5-flash",
+          contents: prompt,
+        });
+        res.json({ text: response.text || "" });
+      }
+
+    } catch (error: any) {
+      console.error("Writing Assistant Error:", error);
+      res.status(500).json({ error: error.message || "An error occurred in the writing assistant." });
+    }
+  });
+
+  // API endpoint for In-App Document & Asset Analysis
+  app.post("/api/gemini/analyze-doc", async (req: any, res: any) => {
+    try {
+      const { fileData, fileName, mimeType, prompt, activeDocContent } = req.body;
+
+      const activeApiKey = process.env.GEMINI_API_KEY;
+      if (!activeApiKey) {
+        return res.status(500).json({ error: "Gemini API Key is not configured." });
+      }
+
+      if (!ai) {
+        ai = new GoogleGenAI({
+          apiKey: activeApiKey,
+          httpOptions: {
+            headers: { 'User-Agent': 'aistudio-build' }
+          }
+        });
+      }
+
+      if (!prompt) {
+        return res.status(400).json({ error: "Missing analysis prompt." });
+      }
+
+      let response;
+
+      // Check if we are dealing with a binary file upload (PDF or Image)
+      if (fileData && mimeType && (mimeType.startsWith("image/") || mimeType === "application/pdf")) {
+        // Strip dataURL header if present
+        let base64 = fileData;
+        if (fileData.includes(";base64,")) {
+          base64 = fileData.split(";base64,")[1];
+        }
+
+        const inlinePart = {
+          inlineData: {
+            mimeType: mimeType,
+            data: base64
+          }
+        };
+
+        const instruction = `You are a high-performance document intelligence analyzer.
+        You are analyzing the attached file "${fileName || "uploaded_document"}" with MIME type "${mimeType}".
+        User instruction: "${prompt}"
+
+        ${activeDocContent ? `The user is currently editing an active document with this content:
+        """
+        ${activeDocContent}
+        """
+        Analyze the uploaded file data and synthesize insights specifically tailored to be integrated, appended, or merged into the active document based on the user's instructions. Use clear, styled Markdown for your response.` : "Provide a comprehensive, highly accurate, and beautifully structured analysis in Markdown."}`;
+
+        response = await ai.models.generateContent({
+          model: "gemini-3.5-flash",
+          contents: [inlinePart, { text: instruction }]
+        });
+      } else {
+        // Fallback for plain text, csv, or code content
+        const textPayload = fileData || "";
+        const instruction = `You are a document intelligence analyst.
+        Analyze the following file text content of file "${fileName || "document"}":
+        """
+        ${textPayload.slice(0, 20000)}
+        """
+
+        User prompt instruction: "${prompt}"
+
+        ${activeDocContent ? `The user is currently editing an active document with this content:
+        """
+        ${activeDocContent}
+        """
+        Synthesize the analysis specifically to help the user insert, merge, or reference the extracted details inside this active document. Use clean, professional Markdown.` : "Provide a detailed, clear Markdown summary or data extraction."}`;
+
+        response = await ai.models.generateContent({
+          model: "gemini-3.5-flash",
+          contents: instruction
+        });
+      }
+
+      res.json({ text: response.text || "No analysis generated." });
+
+    } catch (error: any) {
+      console.error("Document Analysis Error:", error);
+      res.status(500).json({ error: error.message || "An error occurred during document analysis." });
+    }
+  });
+
+  // API endpoint for AI Automation execution
+  app.post("/api/gemini/run-automation", async (req: any, res: any) => {
+    try {
+      const { triggeredDocTitle, triggeredDocContent, targetDocTitle, targetDocContent, prompt } = req.body;
+
+      const activeApiKey = process.env.GEMINI_API_KEY;
+      if (!activeApiKey) {
+        return res.status(500).json({ error: "Gemini API Key is not configured." });
+      }
+
+      if (!ai) {
+        ai = new GoogleGenAI({
+          apiKey: activeApiKey,
+          httpOptions: {
+            headers: { 'User-Agent': 'aistudio-build' }
+          }
+        });
+      }
+
+      if (!prompt || !triggeredDocTitle || !targetDocTitle) {
+        return res.status(400).json({ error: "Missing required parameters to run automation." });
+      }
+
+      const instruction = `You are a high-speed background AI automation pipeline. An event has triggered this automation:
+      Trigger Event: A document titled "${triggeredDocTitle}" has been added or updated in the workspace.
+
+      Content of the triggered document:
+      """
+      ${triggeredDocContent || ""}
+      """
+
+      Target Document to update: "${targetDocTitle}"
+      Current content of the target document:
+      """
+      ${targetDocContent || ""}
+      """
+
+      Task Instruction: "${prompt}"
+
+      Requirements:
+      1. Output the COMPLETE, updated content of the target document with your modifications integrated beautifully.
+      2. Do NOT truncate, abbreviate, or output placeholder comments like "// remaining same". Output the full resulting text so the system can save it directly.
+      3. Maintain the formatting style, tables, lists, or headers of the target document, but insert or merge the new details correctly based on the triggered document content.`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3.5-flash",
+        contents: instruction,
+        config: {
+          temperature: 0.2
+        }
+      });
+
+      res.json({ updatedContent: response.text || targetDocContent });
+
+    } catch (error: any) {
+      console.error("AI Automation Run Error:", error);
+      res.status(500).json({ error: error.message || "An error occurred while executing the AI automation." });
+    }
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({

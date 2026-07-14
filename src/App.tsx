@@ -47,6 +47,7 @@ import DiagramGenerator from './components/DiagramGenerator';
 import ProactiveInsights from './components/ProactiveInsights';
 import SmartBackup from './components/SmartBackup';
 import PresentationWorkspace from './components/PresentationWorkspace';
+import AIAutomations from './components/AIAutomations';
 
 export default function App() {
   // --- Active Persona Session State ---
@@ -58,9 +59,50 @@ export default function App() {
   const [activities, setActivities] = useState<ActivityLog[]>([]);
 
   // --- Workspace Filters & Navigation ---
-  const [activeTab, setActiveTab] = useState<'shelves' | 'all' | 'favorites' | 'trash' | 'chat' | 'graph' | 'diagrams' | 'insights' | 'backup' | 'presentation'>('shelves');
+  const [activeTab, setActiveTab] = useState<'shelves' | 'all' | 'favorites' | 'trash' | 'chat' | 'graph' | 'diagrams' | 'insights' | 'backup' | 'presentation' | 'automations'>('shelves');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
+
+  // --- AI Automations Hub ---
+  const [automations, setAutomations] = useState<any[]>(() => {
+    const saved = localStorage.getItem('doc_manager_automations');
+    if (saved) return JSON.parse(saved);
+    return [
+      {
+        id: 'auto-1',
+        name: 'Sync Work to Task Table',
+        triggerCategory: 'shelf-even-product', // Default development shelf
+        triggerEvent: 'create',
+        targetDocId: 'doc-master-task-table',
+        targetDocTitle: 'Master Task Table',
+        prompt: 'Analyze the new document and compile a single-line summary item inside the Markdown table under the corresponding release phase of the Master Task Table.',
+        enabled: true,
+        lastRun: null
+      }
+    ];
+  });
+
+  const [automationLogs, setAutomationLogs] = useState<any[]>(() => {
+    const saved = localStorage.getItem('doc_manager_automation_logs');
+    return saved ? JSON.parse(saved) : [
+      {
+        id: 'log-initial-auto',
+        automationName: 'Sync Work to Task Table',
+        triggerDocTitle: 'Q3 Development Milestones',
+        status: 'success',
+        timestamp: new Date(Date.now() - 3600000 * 2).toISOString(),
+        message: 'Successfully analyzed new document and appended summary bullet to Master Task Table.'
+      }
+    ];
+  });
+
+  useEffect(() => {
+    localStorage.setItem('doc_manager_automations', JSON.stringify(automations));
+  }, [automations]);
+
+  useEffect(() => {
+    localStorage.setItem('doc_manager_automation_logs', JSON.stringify(automationLogs));
+  }, [automationLogs]);
 
   // --- Semantic Search & Embedding State ---
   const [cachedEmbeddings, setCachedEmbeddings] = useState<Record<string, { embedding: number[]; updatedAt: string }>>(() => {
@@ -364,6 +406,111 @@ export default function App() {
 
     return () => clearTimeout(delayDebounceFn);
   }, [searchQuery, isSemanticSearch]);
+
+  // --- AI Automated Triggers Engine ---
+  const runAutomationsForDoc = async (event: 'create' | 'update', doc: Document) => {
+    const matching = automations.filter(auto => 
+      auto.enabled && 
+      (auto.triggerCategory === 'all' || auto.triggerCategory === doc.category) &&
+      (auto.triggerEvent === event)
+    );
+
+    if (matching.length === 0) return;
+
+    for (const auto of matching) {
+      const targetDoc = documents.find(d => d.id === auto.targetDocId || d.title.toLowerCase() === auto.targetDocTitle.toLowerCase());
+      if (!targetDoc) {
+        const failedLog = {
+          id: `autolog-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+          automationName: auto.name,
+          triggerDocTitle: doc.title,
+          status: 'failed',
+          timestamp: new Date().toISOString(),
+          message: `Target document "${auto.targetDocTitle}" not found in workspace.`
+        };
+        setAutomationLogs(prev => [failedLog, ...prev]);
+        continue;
+      }
+
+      const processingLogId = `autolog-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`;
+      const initLog = {
+        id: processingLogId,
+        automationName: auto.name,
+        triggerDocTitle: doc.title,
+        status: 'running',
+        timestamp: new Date().toISOString(),
+        message: `Triggering Gemini server model update for target "${targetDoc.title}"...`
+      };
+      setAutomationLogs(prev => [initLog, ...prev]);
+
+      try {
+        const response = await fetch('/api/gemini/run-automation', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            triggerDocTitle: doc.title,
+            triggerDocContent: doc.content,
+            targetDocTitle: targetDoc.title,
+            targetDocContent: targetDoc.content,
+            prompt: auto.prompt,
+          })
+        });
+
+        if (!response.ok) {
+          throw new Error(`Server returned status ${response.status}`);
+        }
+
+        const data = await response.json();
+        if (data.updatedContent) {
+          setDocuments(prev => {
+            const nextDocs = prev.map(d => {
+              if (d.id === targetDoc.id) {
+                return {
+                  ...d,
+                  content: data.updatedContent,
+                  updatedAt: new Date().toISOString()
+                };
+              }
+              return d;
+            });
+            localStorage.setItem('doc_manager_documents', JSON.stringify(nextDocs));
+            return nextDocs;
+          });
+
+          setAutomations(prev => prev.map(a => {
+            if (a.id === auto.id) {
+              return { ...a, lastRun: new Date().toISOString() };
+            }
+            return a;
+          }));
+
+          setAutomationLogs(prev => prev.map(l => {
+            if (l.id === processingLogId) {
+              return {
+                ...l,
+                status: 'success',
+                message: `Successfully executed. Updated master document "${targetDoc.title}".`
+              };
+            }
+            return l;
+          }));
+        } else {
+          throw new Error('Automation succeeded but no output content returned.');
+        }
+      } catch (err: any) {
+        setAutomationLogs(prev => prev.map(l => {
+          if (l.id === processingLogId) {
+            return {
+              ...l,
+              status: 'failed',
+              message: `AI execution failed: ${err.message || 'Unknown server error'}`
+            };
+          }
+          return l;
+        }));
+      }
+    }
+  };
 
   // --- Multi-Selection & Selective Export Bundle handlers ---
   const handleToggleSelectDoc = (docId: string, isShift: boolean, shelfDocs?: Document[]) => {
@@ -826,6 +973,7 @@ ${doc.content}`;
     // Keep editor open and synced with the latest version history and content modifications
     if (updatedDoc) {
       setActiveDoc(updatedDoc);
+      runAutomationsForDoc('update', updatedDoc);
     }
   };
 
@@ -852,6 +1000,7 @@ Enter standard paragraphs or lists...`,
     setDocuments(prev => [...prev, newDoc]);
     logAction(newDoc.title, 'create', uid);
     setActiveDoc(newDoc); // Open editor immediately
+    runAutomationsForDoc('create', newDoc);
   };
 
   // Custom File Uploader callback
@@ -890,6 +1039,7 @@ Enter standard paragraphs or lists...`,
 
     setDocuments(prev => [...prev, newDoc]);
     logAction(title, 'upload', uid);
+    runAutomationsForDoc('create', newDoc);
   };
 
   // Dynamically provision document from clicked Wiki link ("red links")
@@ -1207,6 +1357,21 @@ Enter standard paragraphs or lists...`,
           </button>
 
           <button
+            id="tab-automations"
+            onClick={() => { setActiveTab('automations'); setSelectedTag(null); }}
+            className={`w-full text-left font-medium text-xs px-3 py-2 rounded-xl transition-all flex items-center justify-between cursor-pointer ${
+              activeTab === 'automations' 
+                ? 'bg-indigo-50 text-indigo-700 font-semibold' 
+                : 'text-gray-500 hover:bg-gray-50 hover:text-gray-800'
+            }`}
+          >
+            <span className="flex items-center gap-2">
+              <Cpu className="h-4 w-4 text-indigo-500 animate-spin" style={{ animationDuration: '6s' }} /> AI Automations Hub
+            </span>
+            <span className="font-mono text-[9px] bg-indigo-100 text-indigo-800 font-bold border border-indigo-200 rounded px-1 py-0.2">ACTIVE</span>
+          </button>
+
+          <button
             id="tab-trash"
             onClick={() => { setActiveTab('trash'); setSelectedTag(null); }}
             className={`w-full text-left font-medium text-xs px-3 py-2 rounded-xl transition-all flex items-center justify-between cursor-pointer ${
@@ -1312,7 +1477,8 @@ Enter standard paragraphs or lists...`,
                  activeTab === 'chat' ? 'Workspace Assistant' : 
                  activeTab === 'graph' ? 'AI Knowledge Graph' : 
                  activeTab === 'diagrams' ? 'AI Auto-Diagramming Engine' : 
-                 activeTab === 'insights' ? 'AI Proactive Insights' : 'Trash Collection'}
+                 activeTab === 'insights' ? 'AI Proactive Insights' : 
+                 activeTab === 'automations' ? 'AI Automations Hub' : 'Trash Collection'}
               </h2>
               <p className="text-xs text-gray-400 mt-0.5">
                 {activeTab === 'shelves' ? 'Categorized rows according to physics equations and balance release cycles' : 
@@ -1320,6 +1486,7 @@ Enter standard paragraphs or lists...`,
                  activeTab === 'graph' ? 'Interactive 3D representation mapping semantic document connections and unwritten research' :
                  activeTab === 'diagrams' ? 'Generate, render, and edit flowcharts and database schemas dynamically using AI' :
                  activeTab === 'insights' ? 'Discover outdated document alerts, logical contradictions, and weekly achievements summaries' :
+                 activeTab === 'automations' ? 'Secure orchestration of event-driven workflows utilizing Gemini reasoning models' :
                  `Secure file lists holding ${filteredDocs.length} elements.`}
               </p>
             </div>
@@ -1439,7 +1606,16 @@ Enter standard paragraphs or lists...`,
 
         {/* 4. MAIN ACTION SPACE */}
         <div id="workspace-action-space" className="flex-1 flex flex-col">
-          {activeTab === 'chat' ? (
+          {activeTab === 'automations' ? (
+            <AIAutomations
+              documents={documents}
+              shelves={shelves}
+              automations={automations}
+              setAutomations={setAutomations}
+              automationLogs={automationLogs}
+              setAutomationLogs={setAutomationLogs}
+            />
+          ) : activeTab === 'chat' ? (
             <RagChat
               documents={documents}
               shelves={shelves}

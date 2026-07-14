@@ -17,7 +17,8 @@ import {
   ArrowRight,
   Trash2,
   Copy,
-  Info
+  Info,
+  X
 } from 'lucide-react';
 
 interface SmartVoiceSuiteProps {
@@ -48,7 +49,7 @@ export default function SmartVoiceSuite({
   onChangeTitle,
   isReadOnly = false
 }: SmartVoiceSuiteProps) {
-  const [activeTab, setActiveTab] = useState<'dictation' | 'podcast' | 'grammar'>('dictation');
+  const [activeTab, setActiveTab] = useState<'dictation' | 'podcast' | 'grammar' | 'assistant' | 'analysis'>('dictation');
 
   // Common loading / error states
   const [loading, setLoading] = useState<boolean>(false);
@@ -94,6 +95,18 @@ export default function SmartVoiceSuite({
   const [rewrites, setRewrites] = useState<ToneRewrite[]>([]);
   const [scanDone, setScanDone] = useState<boolean>(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  // 4. WRITING ASSISTANT STATES
+  const [assistantContext, setAssistantContext] = useState<string>('');
+  const [assistantOutput, setAssistantOutput] = useState<string>('');
+  const [assistantCorrections, setAssistantCorrections] = useState<string[]>([]);
+  const [assistantActiveAction, setAssistantActiveAction] = useState<'continue' | 'formal-email' | 'proofread' | null>(null);
+
+  // 5. DOCUMENT ANALYZER STATES
+  const [analysisFile, setAnalysisFile] = useState<{ name: string; size: number; type: string; dataUrl: string } | null>(null);
+  const [analysisPrompt, setAnalysisPrompt] = useState<string>('Summarize this document and list key action items.');
+  const [analysisOutput, setAnalysisOutput] = useState<string>('');
+  const [isDragging, setIsDragging] = useState<boolean>(false);
 
   // Initialize Speech Recognition (Web Speech API) if available
   useEffect(() => {
@@ -580,6 +593,107 @@ export default function SmartVoiceSuite({
     setTimeout(() => setSuccessMessage(null), 3000);
   };
 
+  const handleRunAssistant = async (action: 'continue' | 'formal-email' | 'proofread') => {
+    if (!content || content.trim() === '') {
+      setError('Please write some content first for the assistant to analyze.');
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    setAssistantActiveAction(action);
+    setAssistantOutput('');
+    setAssistantCorrections([]);
+    setStatusText(
+      action === 'continue' ? 'Co-writing next paragraphs...' :
+      action === 'formal-email' ? 'Composing formal email structure...' :
+      'Proofreading & polishing technical phrasing...'
+    );
+
+    try {
+      const response = await fetch('/api/gemini/writing-assistant', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: content,
+          action,
+          context: assistantContext
+        })
+      });
+
+      if (!response.ok) {
+        const errData = await response.json();
+        throw new Error(errData.error || 'Failed to process writing assistant request.');
+      }
+
+      const data = await response.json();
+      if (action === 'proofread') {
+        setAssistantOutput(data.polishedText);
+        setAssistantCorrections(data.corrections || []);
+      } else {
+        setAssistantOutput(data.text);
+        setAssistantCorrections([]);
+      }
+    } catch (err: any) {
+      setError(err.message || 'An error occurred.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRunAnalysis = async () => {
+    if (!analysisFile && (!content || content.trim() === '')) {
+      setError('Please upload a file/image or write some content in the editor to analyze.');
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    setAnalysisOutput('');
+    setStatusText('Ingesting asset and scanning structure...');
+
+    try {
+      const response = await fetch('/api/gemini/analyze-doc', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fileData: analysisFile ? analysisFile.dataUrl : content,
+          fileName: analysisFile ? analysisFile.name : 'active_editor_doc.txt',
+          mimeType: analysisFile ? analysisFile.type : 'text/plain',
+          prompt: analysisPrompt,
+          activeDocContent: content
+        })
+      });
+
+      if (!response.ok) {
+        const errData = await response.json();
+        throw new Error(errData.error || 'Failed to complete document analysis.');
+      }
+
+      const data = await response.json();
+      setAnalysisOutput(data.text);
+    } catch (err: any) {
+      setError(err.message || 'An error occurred.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleFileUpload = (file: File) => {
+    setError(null);
+    const reader = new FileReader();
+    reader.onload = () => {
+      setAnalysisFile({
+        name: file.name,
+        size: file.size,
+        type: file.type,
+        dataUrl: reader.result as string
+      });
+    };
+    reader.onerror = () => {
+      setError('Failed to read the file.');
+    };
+    reader.readAsDataURL(file);
+  };
+
   return (
     <div className="flex flex-col h-full bg-white text-gray-800">
       
@@ -611,39 +725,61 @@ export default function SmartVoiceSuite({
       </AnimatePresence>
 
       {/* Tabs list inside Smart Suite */}
-      <div className="flex border-b border-gray-100 pb-3 mb-4 gap-1 select-none shrink-0">
+      <div className="flex overflow-x-auto pb-2 mb-3 gap-1 select-none shrink-0 border-b border-gray-100 -mx-2 px-2 scrollbar-none">
         <button
           onClick={() => { setActiveTab('dictation'); setError(null); }}
-          className={`flex-1 py-2 px-1 rounded-xl text-xs font-bold transition-all flex flex-col items-center gap-1 cursor-pointer border ${
+          className={`flex-1 min-w-[72px] py-1.5 px-1 rounded-xl text-[10px] font-extrabold transition-all flex flex-col items-center gap-1 cursor-pointer border ${
             activeTab === 'dictation'
               ? 'bg-indigo-50 border-indigo-200 text-indigo-750 shadow-xs'
-              : 'bg-white border-transparent text-gray-500 hover:text-gray-800'
+              : 'bg-white border-transparent text-gray-400 hover:text-gray-700'
           }`}
         >
-          <Mic className="h-4 w-4" />
+          <Mic className="h-3.5 w-3.5 shrink-0" />
           <span>Dictation</span>
         </button>
         <button
           onClick={() => { setActiveTab('podcast'); setError(null); }}
-          className={`flex-1 py-2 px-1 rounded-xl text-xs font-bold transition-all flex flex-col items-center gap-1 cursor-pointer border ${
+          className={`flex-1 min-w-[72px] py-1.5 px-1 rounded-xl text-[10px] font-extrabold transition-all flex flex-col items-center gap-1 cursor-pointer border ${
             activeTab === 'podcast'
               ? 'bg-indigo-50 border-indigo-200 text-indigo-750 shadow-xs'
-              : 'bg-white border-transparent text-gray-500 hover:text-gray-800'
+              : 'bg-white border-transparent text-gray-400 hover:text-gray-700'
           }`}
         >
-          <Volume2 className="h-4 w-4" />
-          <span>Podcast Studio</span>
+          <Volume2 className="h-3.5 w-3.5 shrink-0" />
+          <span>Podcast</span>
         </button>
         <button
           onClick={() => { setActiveTab('grammar'); setError(null); }}
-          className={`flex-1 py-2 px-1 rounded-xl text-xs font-bold transition-all flex flex-col items-center gap-1 cursor-pointer border ${
+          className={`flex-1 min-w-[72px] py-1.5 px-1 rounded-xl text-[10px] font-extrabold transition-all flex flex-col items-center gap-1 cursor-pointer border ${
             activeTab === 'grammar'
               ? 'bg-indigo-50 border-indigo-200 text-indigo-750 shadow-xs'
-              : 'bg-white border-transparent text-gray-500 hover:text-gray-800'
+              : 'bg-white border-transparent text-gray-400 hover:text-gray-700'
           }`}
         >
-          <Sparkles className="h-4 w-4" />
-          <span>Proofreader</span>
+          <Check className="h-3.5 w-3.5 shrink-0" />
+          <span>Grammar</span>
+        </button>
+        <button
+          onClick={() => { setActiveTab('assistant'); setError(null); }}
+          className={`flex-1 min-w-[72px] py-1.5 px-1 rounded-xl text-[10px] font-extrabold transition-all flex flex-col items-center gap-1 cursor-pointer border ${
+            activeTab === 'assistant'
+              ? 'bg-indigo-50 border-indigo-200 text-indigo-750 shadow-xs'
+              : 'bg-white border-transparent text-gray-400 hover:text-gray-700'
+          }`}
+        >
+          <Sparkles className="h-3.5 w-3.5 shrink-0" />
+          <span>Assistant</span>
+        </button>
+        <button
+          onClick={() => { setActiveTab('analysis'); setError(null); }}
+          className={`flex-1 min-w-[72px] py-1.5 px-1 rounded-xl text-[10px] font-extrabold transition-all flex flex-col items-center gap-1 cursor-pointer border ${
+            activeTab === 'analysis'
+              ? 'bg-indigo-50 border-indigo-200 text-indigo-750 shadow-xs'
+              : 'bg-white border-transparent text-gray-400 hover:text-gray-700'
+          }`}
+        >
+          <FileText className="h-3.5 w-3.5 shrink-0" />
+          <span>Analysis</span>
         </button>
       </div>
 
@@ -1107,6 +1243,265 @@ export default function SmartVoiceSuite({
               </div>
             )}
 
+          </div>
+        )}
+
+        {/* TAB 4: WRITING ASSISTANT */}
+        {activeTab === 'assistant' && (
+          <div className="flex flex-col gap-4">
+            <div className="text-center">
+              <h4 className="text-xs font-bold text-gray-800 flex items-center justify-center gap-1">
+                <Sparkles className="h-3.5 w-3.5 text-indigo-500 animate-pulse" /> Writing Assistant
+              </h4>
+              <p className="text-[10px] text-gray-450 mt-1">
+                Optimize, extend, or convert your active editor text instantly.
+              </p>
+            </div>
+
+            {/* Custom Instruction context field */}
+            <div className="flex flex-col gap-1.5 bg-gray-50 p-3 rounded-2xl border border-gray-150">
+              <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1">
+                <Sparkles className="h-3 w-3 text-indigo-550" /> Optional Focus Direction
+              </label>
+              <input
+                type="text"
+                value={assistantContext}
+                onChange={(e) => setAssistantContext(e.target.value)}
+                placeholder="e.g. Keep it concise, make it sound persuasive..."
+                className="w-full text-xs bg-white border border-gray-200 rounded-lg p-2 focus:border-indigo-500 focus:outline-none"
+              />
+            </div>
+
+            {/* AI Action Triggers */}
+            <div className="grid grid-cols-1 gap-2">
+              <button
+                onClick={() => handleRunAssistant('continue')}
+                disabled={isReadOnly}
+                className="py-2.5 px-3 bg-white border border-gray-200 hover:border-indigo-200 hover:bg-indigo-50/20 text-gray-700 hover:text-indigo-900 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center justify-between"
+              >
+                <span className="flex items-center gap-2">
+                  <span className="p-1 bg-indigo-50 rounded-lg text-indigo-600">✍️</span>
+                  Continue Writing
+                </span>
+                <ChevronRight className="h-3.5 w-3.5 text-gray-450 animate-bounce" style={{ animationDirection: 'reverse', animationDuration: '2s' }} />
+              </button>
+
+              <button
+                onClick={() => handleRunAssistant('formal-email')}
+                disabled={isReadOnly}
+                className="py-2.5 px-3 bg-white border border-gray-200 hover:border-indigo-200 hover:bg-indigo-50/20 text-gray-700 hover:text-indigo-900 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center justify-between"
+              >
+                <span className="flex items-center gap-2">
+                  <span className="p-1 bg-emerald-50 rounded-lg text-emerald-600">✉️</span>
+                  Convert to Formal Email
+                </span>
+                <ChevronRight className="h-3.5 w-3.5 text-gray-450" />
+              </button>
+
+              <button
+                onClick={() => handleRunAssistant('proofread')}
+                disabled={isReadOnly}
+                className="py-2.5 px-3 bg-white border border-gray-200 hover:border-indigo-200 hover:bg-indigo-50/20 text-gray-700 hover:text-indigo-900 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center justify-between"
+              >
+                <span className="flex items-center gap-2">
+                  <span className="p-1 bg-amber-50 rounded-lg text-amber-600">🔍</span>
+                  Instant Proofread & Refine
+                </span>
+                <ChevronRight className="h-3.5 w-3.5 text-gray-450" />
+              </button>
+            </div>
+
+            {/* Output Panel */}
+            {assistantOutput && (
+              <div className="mt-2 bg-indigo-50/30 border border-indigo-100 rounded-2xl p-3.5 flex flex-col gap-3">
+                <span className="text-[10px] font-bold text-indigo-850 uppercase tracking-wider flex items-center gap-1 select-none">
+                  <Sparkles className="h-3 w-3 text-indigo-550" /> Assistant Output
+                </span>
+
+                {assistantCorrections.length > 0 && (
+                  <div className="flex flex-col gap-1.5 bg-white p-2.5 rounded-xl border border-indigo-50">
+                    <span className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Corrections Summary:</span>
+                    <ul className="list-disc list-inside text-[10px] text-gray-600 flex flex-col gap-1 font-sans">
+                      {assistantCorrections.map((c, i) => (
+                        <li key={i} className="leading-tight">{c}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                <div className="text-xs text-gray-750 font-sans leading-relaxed select-text bg-white p-3 rounded-xl border border-gray-200/80 max-h-60 overflow-y-auto whitespace-pre-wrap">
+                  {assistantOutput}
+                </div>
+
+                <div className="flex items-center gap-2 select-none">
+                  <button
+                    onClick={() => {
+                      onChangeContent(assistantOutput);
+                      setSuccessMessage('Successfully replaced active document with polished version!');
+                      setTimeout(() => setSuccessMessage(null), 3000);
+                    }}
+                    className="flex-1 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-bold rounded-lg cursor-pointer transition-colors"
+                  >
+                    Replace Document Text
+                  </button>
+                  <button
+                    onClick={() => {
+                      onChangeContent(content + '\n\n' + assistantOutput);
+                      setSuccessMessage('Appended assistant output to the document!');
+                      setTimeout(() => setSuccessMessage(null), 3000);
+                    }}
+                    className="flex-1 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-850 text-[10px] font-bold rounded-lg cursor-pointer transition-colors border border-indigo-100"
+                  >
+                    Append to Bottom
+                  </button>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(assistantOutput);
+                      setSuccessMessage('Copied output to clipboard!');
+                      setTimeout(() => setSuccessMessage(null), 3000);
+                    }}
+                    className="p-2 bg-white hover:bg-gray-150 border border-gray-200 rounded-lg text-gray-500 hover:text-gray-850 transition-colors cursor-pointer"
+                    title="Copy response"
+                  >
+                    <Copy className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* TAB 5: DOCUMENT & ASSET ANALYSIS */}
+        {activeTab === 'analysis' && (
+          <div className="flex flex-col gap-4">
+            <div className="text-center">
+              <h4 className="text-xs font-bold text-gray-800 flex items-center justify-center gap-1">
+                <FileText className="h-3.5 w-3.5 text-indigo-500" /> Asset Ingest & Analysis
+              </h4>
+              <p className="text-[10px] text-gray-450 mt-1">
+                Upload raw documents, images, or PDFs for smart semantic analysis.
+              </p>
+            </div>
+
+            {/* Drag and Drop Zone */}
+            <div
+              onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+              onDragLeave={() => setIsDragging(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setIsDragging(false);
+                if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                  handleFileUpload(e.dataTransfer.files[0]);
+                }
+              }}
+              className={`border-2 border-dashed rounded-2xl p-4 transition-all flex flex-col items-center justify-center text-center gap-2 select-none cursor-pointer ${
+                isDragging
+                  ? 'border-indigo-500 bg-indigo-50/40 text-indigo-750 scale-[0.98]'
+                  : 'border-gray-200 hover:border-indigo-300 bg-gray-50/30'
+              }`}
+              onClick={() => {
+                const el = window.document.getElementById('analysis-file-input');
+                if (el) el.click();
+              }}
+            >
+              <input
+                id="analysis-file-input"
+                type="file"
+                accept="image/*,application/pdf"
+                className="hidden"
+                onChange={(e) => {
+                  if (e.target.files && e.target.files[0]) {
+                    handleFileUpload(e.target.files[0]);
+                  }
+                }}
+              />
+              <span className="text-2xl animate-pulse" style={{ animationDuration: '3s' }}>📥</span>
+              <span className="text-xs font-bold text-gray-700">Drag & Drop Image or PDF</span>
+              <span className="text-[9px] text-gray-450">Or click to select from file browser (Max 10MB)</span>
+            </div>
+
+            {/* File display card */}
+            {analysisFile && (
+              <div className="bg-gray-50 border border-gray-150 p-3 rounded-2xl flex items-center gap-2.5">
+                <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl">
+                  {analysisFile.type.startsWith('image/') ? '🖼️' : '📄'}
+                </div>
+                <div className="flex flex-col min-w-0 flex-1">
+                  <span className="text-xs font-bold text-gray-800 truncate" title={analysisFile.name}>
+                    {analysisFile.name}
+                  </span>
+                  <span className="text-[9px] text-gray-400 font-mono">
+                    Size: {(analysisFile.size / 1024).toFixed(1)} KB
+                  </span>
+                </div>
+                <button
+                  onClick={() => setAnalysisFile(null)}
+                  className="p-1 text-gray-400 hover:text-red-500 hover:bg-gray-200 rounded-lg transition-colors cursor-pointer"
+                  title="Discard file"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            )}
+
+            {/* Prompt Command */}
+            <div className="flex flex-col gap-1.5 bg-gray-50 p-3 rounded-2xl border border-gray-150">
+              <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1">
+                <Sparkles className="h-3 w-3 text-indigo-550" /> Analysis Prompt Instruction
+              </label>
+              <textarea
+                value={analysisPrompt}
+                onChange={(e) => setAnalysisPrompt(e.target.value)}
+                rows={2}
+                placeholder="e.g. Summarize this invoice and format as a Markdown table..."
+                className="w-full text-xs bg-white border border-gray-200 rounded-lg p-2 focus:border-indigo-500 focus:outline-none resize-none font-sans"
+              />
+            </div>
+
+            {/* Submit Analysis Button */}
+            <button
+              onClick={handleRunAnalysis}
+              className="py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 cursor-pointer shadow-xs transition-colors"
+            >
+              <Sparkles className="h-4 w-4" /> Run Asset Intelligence
+            </button>
+
+            {/* Response Area */}
+            {analysisOutput && (
+              <div className="bg-amber-50/40 border border-amber-100 rounded-2xl p-3.5 flex flex-col gap-3">
+                <span className="text-[10px] font-bold text-amber-900 uppercase tracking-wider flex items-center gap-1 select-none">
+                  💡 Analysis Results
+                </span>
+
+                <div className="text-xs text-gray-750 font-sans leading-relaxed select-text bg-white p-3 rounded-xl border border-amber-100 max-h-64 overflow-y-auto whitespace-pre-wrap">
+                  {analysisOutput}
+                </div>
+
+                <div className="flex items-center gap-2 select-none">
+                  <button
+                    onClick={() => {
+                      onChangeContent(content + '\n\n' + analysisOutput);
+                      setSuccessMessage('Successfully appended analysis results to document!');
+                      setTimeout(() => setSuccessMessage(null), 3000);
+                    }}
+                    className="flex-1 py-2 bg-amber-600 hover:bg-amber-700 text-white text-[10px] font-bold rounded-lg cursor-pointer transition-colors"
+                  >
+                    Append to Editor
+                  </button>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(analysisOutput);
+                      setSuccessMessage('Copied analysis to clipboard!');
+                      setTimeout(() => setSuccessMessage(null), 3000);
+                    }}
+                    className="p-2 bg-white hover:bg-gray-150 border border-gray-200 rounded-lg text-gray-500 hover:text-gray-800 transition-colors cursor-pointer"
+                    title="Copy output"
+                  >
+                    <Copy className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
